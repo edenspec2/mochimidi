@@ -19,10 +19,12 @@ type Voice = Tone.Sampler | NativeSynth
 const RAMP = 0.04 // s: long enough to avoid zipper noise from 7-bit knob steps, short enough to feel direct
 /**
  * Volume slider above this point stops raising the output (already at 0 dB) and instead pushes the mix into the limiter,
- * up to PUSH_DB at full: louder, at the cost of squashing peaks. The PC mix sits ~8 dB under the phone's, so it gets more.
+ * up to PUSH_DB at full: louder, at the cost of squashing peaks. 12 dB left a full Create mix constantly over the limiter.
  */
 const PUSH_FROM = 0.8
-const PUSH_DB = { light: 8, full: 12 }
+const PUSH_DB = 8
+/** Level of the drum kits and pad sounds. On the PC they sat 12 dB and more over the keys and drove the bus compressor, which ducked every other track. */
+const DRUM_BUS = { light: 0.8, full: 0.5 }
 const XFADE = 0.03 // s: switching an effect in or out
 const REVERB_XFADE = 0.15 // s: from the old reverb to a newly rendered one
 
@@ -37,23 +39,7 @@ const padGain = (vel: number) => 0.25 + 0.75 * (Math.max(1, vel) / 127) ** 0.8
 /** Seconds without a drum hit before the kits are disposed. */
 const KIT_IDLE = 30
 
-interface MetalOpts { decay: number; release: number; harmonicity: number; modulationIndex: number; resonance: number; octaves: number; volume: number }
-/**
- * A metallic hit (hats, crash, kartals, manjira) played as (frequency, duration, time, velocity). Phones get
- * high-passed noise instead of Tone's MetalSynth: its six FM oscillator pairs cost ~9 % of a PC's audio thread
- * from the moment it exists, filtered noise about 0.5 %.
- */
-function metal(light: boolean, o: MetalOpts, bus: Tone.ToneAudioNode, nodes: Tone.ToneAudioNode[]) {
-  if (!light) {
-    const m = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: o.decay, release: o.release }, harmonicity: o.harmonicity, modulationIndex: o.modulationIndex, resonance: o.resonance, octaves: o.octaves, volume: o.volume }).connect(bus)
-    nodes.push(m)
-    return (freq: number, dur: number, t: number, v: number) => { m.triggerAttackRelease(freq, dur, t, v) }
-  }
-  const hp = new Tone.Filter(o.resonance, 'highpass').connect(bus)
-  const n = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: o.decay, sustain: 0, release: o.release }, volume: o.volume + NOISE_TRIM }).connect(hp)
-  nodes.push(hp, n)
-  return (_freq: number, dur: number, t: number, v: number) => { n.triggerAttackRelease(dur, t, v) }
-}
+interface MetalOpts { freq: number; dur: number; decay: number; release: number; harmonicity: number; modulationIndex: number; resonance: number; octaves: number; volume: number }
 /** dB added to the noise stand-in to sound as loud as the MetalSynth it replaces (measured: hats 11–13 dB, bells 4–10). */
 const NOISE_TRIM = 10
 
@@ -240,7 +226,7 @@ class AudioEngine {
     // accepts (a touch's press-down), resuming waits for the next one, and the instruments must already exist then.
     // Waiting here used to leave the app silent for good on phones.
     // The click and the drum kits are built on first use: a Tone object costs audio-thread time from the moment it
-    // exists, connected or not (the kit's three hats alone ~27 % of a PC's audio thread with nothing playing).
+    // exists, connected or not.
     this.started = true
     this.chain = this.makeChain()
     // Synth sounds go through a vibrato the mod strip controls (depth 0 = no effect). It costs ~1.3 % of a PC's audio
@@ -289,7 +275,8 @@ class AudioEngine {
     const keysVol = new Tone.Volume(0).connect(delay)
     const drumsVol = new Tone.Volume(0).connect(delay)
     // Tone's tremolo centres its gain on 0.5 whatever the depth; ×2 makes depth 0 exactly unity.
-    const tremoloGain = new Tone.Gain(2).connect(keysVol)
+    // A further ×2 (+6 dB): the piano peaks near -13 dB, far under the drums, and every track shares this path.
+    const tremoloGain = new Tone.Gain(4).connect(keysVol)
     const tremolo = new Tone.Tremolo({ frequency: 4, depth: 0, spread: 180 }).connect(tremoloGain).start()
     const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0 })
     const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).start()
@@ -400,53 +387,95 @@ class AudioEngine {
     v.set(opts)
   }
 
+  /**
+   * A metallic hit (hats, crash, kartals, manjira) played as (time, velocity). Tone's MetalSynth costs ~9 % of a PC's
+   * audio thread each from the moment it exists, and drum-heavy Create tracks held it at capacity, so the PC renders
+   * each hit once and replays the recording: the same sound for almost nothing. Phones get high-passed noise.
+   */
+  private metal(o: MetalOpts, bus: Tone.ToneAudioNode, nodes: Tone.ToneAudioNode[]) {
+    if (!this.light) {
+      const hit = this.renderMetal(o)
+      return (t: number, v: number) => void hit.then((buf) => this.playBuffer(buf, v, t, bus))
+    }
+    const hp = new Tone.Filter(o.resonance, 'highpass').connect(bus)
+    const n = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: o.decay, sustain: 0, release: o.release }, volume: o.volume + NOISE_TRIM }).connect(hp)
+    nodes.push(hp, n)
+    return (t: number, v: number) => { n.triggerAttackRelease(o.dur, t, v) }
+  }
+  private metalHits = new Map<string, Promise<AudioBuffer>>() // outlives the kits, which are dropped when idle
+  private renderMetal(o: MetalOpts) {
+    const key = JSON.stringify(o)
+    let job = this.metalHits.get(key)
+    if (!job) {
+      // Not Tone.Offline: it swaps Tone's global context while it starts, which caught the rest of the kit being built.
+      const offline = new Tone.OfflineContext(2, Math.max(o.dur + o.release, o.decay) + 0.05, this.ctx.sampleRate)
+      new Tone.MetalSynth({ context: offline, envelope: { attack: 0.001, decay: o.decay, release: o.release }, harmonicity: o.harmonicity, modulationIndex: o.modulationIndex, resonance: o.resonance, octaves: o.octaves, volume: o.volume })
+        .connect(offline.rawContext.destination).triggerAttackRelease(o.freq, o.dur, 0, 1)
+      job = offline.render().then((b) => {
+        const buf = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate) // Tone's context plays only its own buffers
+        for (let c = 0; c < b.numberOfChannels; c++) buf.getChannelData(c).set(b.getChannelData(c))
+        return buf
+      })
+      this.metalHits.set(key, job)
+    }
+    return job
+  }
+  /** One shot of a buffer; its nodes go when it ends. */
+  private playBuffer(buf: AudioBuffer, level: number, time: number, to: Tone.ToneAudioNode) {
+    const src = this.ctx.createBufferSource(), g = this.ctx.createGain()
+    src.buffer = buf; g.gain.value = level
+    src.connect(g); Tone.connect(g, to)
+    src.onended = () => g.disconnect()
+    src.start(Math.max(time, this.now()))
+  }
+
   /** A small synthesized kit (no samples, works offline): Kick, Snare, Closed hat, Open hat, Clap, Low tom, High tom, Crash. */
   private makeKit(): DrumSet {
     // Drums skip the keys' filter/drive/modulation but share the delay and reverb (and their own volume).
     const nodes: Tone.ToneAudioNode[] = [], k = <T extends Tone.ToneAudioNode>(n: T) => (nodes.push(n), n)
-    const bus = k(new Tone.Gain(0.8)).connect(this.chain!.drumsVol)
+    const bus = k(new Tone.Gain(DRUM_BUS[this.light ? 'light' : 'full'])).connect(this.chain!.drumsVol)
     const kick = k(new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.1 } })).connect(bus)
     const snareBody = k(new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 2, envelope: { attack: 0.001, decay: 0.12, sustain: 0 }, volume: -8 })).connect(bus)
     const snare = k(new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 }, volume: -10 })).connect(k(new Tone.Filter(1800, 'highpass')).connect(bus))
-    const hat = (decay: number, volume = -22) => metal(this.light, { decay, release: 0.01, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume }, bus, nodes)
+    const hat = (dur: number, decay: number, volume = -22) => this.metal({ freq: 300, dur, decay, release: 0.01, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume }, bus, nodes)
     // Measured: the closed hat's 50 ms tick sat ~15 dB under the open hat, and the clap (pink noise through a narrow
     // band) ~22 dB under the snare; both raised to sit with the rest of the kit.
-    const closed = hat(0.05, -14), open = hat(0.35), crash = hat(1.4)
+    const closed = hat(0.05, 0.05, -14), open = hat(0.3, 0.35), crash = hat(1.2, 1.4)
     const clap = k(new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.002, decay: 0.16, sustain: 0 }, volume: 12 })).connect(k(new Tone.Filter(1200, 'bandpass')).connect(bus))
     const tom = k(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 3, envelope: { attack: 0.001, decay: 0.35, sustain: 0 }, volume: -4 })).connect(bus)
     const tomHi = k(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 3, envelope: { attack: 0.001, decay: 0.3, sustain: 0 }, volume: -4 })).connect(bus)
     return { nodes, hits: [
       (t: number, v: number) => kick.triggerAttackRelease('C1', 0.3, t, v),
       (t: number, v: number) => { snare.triggerAttackRelease(0.15, t, v); snareBody.triggerAttackRelease('G2', 0.1, t, v) },
-      (t: number, v: number) => closed(300, 0.05, t, v),
-      (t: number, v: number) => open(300, 0.3, t, v),
+      closed,
+      open,
       (t: number, v: number) => clap.triggerAttackRelease(0.12, t, v),
       (t: number, v: number) => tom.triggerAttackRelease('G2', 0.3, t, v),
       (t: number, v: number) => tomHi.triggerAttackRelease('D3', 0.25, t, v),
-      (t: number, v: number) => crash(300, 1.2, t, v * 0.8),
+      (t: number, v: number) => crash(t, v * 0.8),
     ] }
   }
 
   /** Kirtan kit: dholak strokes (Ge, Na, Tin, Ka), kartals, manjira, ghungroo and a deep khol – all synthesized. */
   private makeKirtanKit(): DrumSet {
     const nodes: Tone.ToneAudioNode[] = [], k = <T extends Tone.ToneAudioNode>(n: T) => (nodes.push(n), n)
-    const bus = k(new Tone.Gain(0.8)).connect(this.chain!.drumsVol)
-    const skin = (pitchDecay: number, octaves: number, decay: number, volume = 0) =>
+    const bus = k(new Tone.Gain(DRUM_BUS[this.light ? 'light' : 'full'])).connect(this.chain!.drumsVol)
+    const skin =(pitchDecay: number, octaves: number, decay: number, volume = 0) =>
       k(new Tone.MembraneSynth({ pitchDecay, octaves, envelope: { attack: 0.001, decay, sustain: 0, release: 0.05 }, volume })).connect(bus)
     const ge = skin(0.12, 2.5, 0.55), khol = skin(0.25, 3, 0.8, -5)
     const na = skin(0.008, 1.2, 0.28, -6), tin = skin(0.006, 1, 0.07, -8)
     const ka = k(new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.08, sustain: 0 }, volume: 10 })).connect(k(new Tone.Filter(1100, 'bandpass')).connect(bus))
-    const bell = (decay: number, harmonicity: number, resonance: number, volume: number) =>
-      metal(this.light, { decay, release: 0.05, harmonicity, modulationIndex: 20, resonance, octaves: 1, volume }, bus, nodes)
-    const kartal = bell(0.12, 7.3, 6500, -11), manjira = bell(1.1, 12.1, 5200, -14)
+    const bell = (freq: number, dur: number, decay: number, harmonicity: number, resonance: number, volume: number) =>
+      this.metal({ freq, dur, decay, release: 0.05, harmonicity, modulationIndex: 20, resonance, octaves: 1, volume }, bus, nodes)
+    const kartal = bell(900, 0.1, 0.12, 7.3, 6500, -11), manjira = bell(1200, 1, 1.1, 12.1, 5200, -14)
     const ghungroo = k(new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.004, decay: 0.12, sustain: 0 }, volume: -8 })).connect(k(new Tone.Filter(6500, 'highpass')).connect(bus))
     return { nodes, hits: [
       (t: number, v: number) => ge.triggerAttackRelease('A1', 0.4, t, v), // Ge: low dholak, pitch glides down
       (t: number, v: number) => na.triggerAttackRelease('D4', 0.2, t, v), // Na: open treble ring
       (t: number, v: number) => tin.triggerAttackRelease('F4', 0.06, t, v), // Tin: closed treble
       (t: number, v: number) => ka.triggerAttackRelease(0.05, t, v), // Ka: flat-hand slap
-      (t: number, v: number) => kartal(900, 0.1, t, v), // Kartals: bright jingle
-      (t: number, v: number) => manjira(1200, 1, t, v * 0.8), // Manjira: small cymbals that ring
+      kartal, // Kartals: bright jingle
+      (t: number, v: number) => manjira(t, v * 0.8), // Manjira: small cymbals that ring
       (t: number, v: number) => ghungroo.triggerAttackRelease(0.1, t, v), // Ghungroo: ankle bells / shaker
       (t: number, v: number) => khol.triggerAttackRelease('E1', 0.6, t, v), // Khol: deep mridanga bass
     ] }
@@ -465,11 +494,7 @@ class AudioEngine {
     if (own) {
       let buf = this.padBuffers[k]
       if (!buf) { buf = this.padBuffers[k] = this.ctx.createBuffer(1, own.data.length, own.rate); buf.copyToChannel(own.data, 0) }
-      const src = this.ctx.createBufferSource(), g = this.ctx.createGain()
-      src.buffer = buf; g.gain.value = padGain(vel)
-      src.connect(g); Tone.connect(g, this.chain!.drumsVol)
-      src.onended = () => g.disconnect()
-      src.start(Math.max(time, this.now()))
+      this.playBuffer(buf, padGain(vel) * DRUM_BUS[this.light ? 'light' : 'full'], time, this.chain!.drumsVol)
       return
     }
     kitId ??= drumKit.id
@@ -580,13 +605,14 @@ class AudioEngine {
   private makeSynth(id: InstrumentId): Voice {
     const out = this.vibrato ?? this.chain!.input
     const base = { kind: 'osc', count: 1, spread: 0, harmonicity: 3, modulationIndex: 0, portamento: 0 } as const
-    const patch: Patch = id === 'epiano' ? { ...base, kind: 'fm', type: 'sine', modulationIndex: 6, envelope: { attack: 0.002, decay: 1.2, sustain: 0.25, release: 0.8 }, volume: -10 }
-      : id === 'strings' ? { ...base, kind: 'am', type: 'sine', envelope: { attack: 0.25, decay: 0.3, sustain: 0.8, release: 1.4 }, volume: -12 }
+    // Volumes sit each sound within about 7 dB of the piano (measured over a note); a synth track used to vanish under it.
+    const patch: Patch = id === 'epiano' ? { ...base, kind: 'fm', type: 'sine', modulationIndex: 6, envelope: { attack: 0.002, decay: 1.2, sustain: 0.25, release: 0.8 }, volume: -6 }
+      : id === 'strings' ? { ...base, kind: 'am', type: 'sine', envelope: { attack: 0.25, decay: 0.3, sustain: 0.8, release: 1.4 }, volume: -7 }
       // Three stacked saws; Timbre sets their detune spread.
-      : id === 'synth' ? { ...base, type: 'sawtooth', count: 3, spread: 20, envelope: { attack: 0.005, decay: 0.2, sustain: 0.4, release: 0.3 }, volume: -22 }
+      : id === 'synth' ? { ...base, type: 'sawtooth', count: 3, spread: 20, envelope: { attack: 0.005, decay: 0.2, sustain: 0.4, release: 0.3 }, volume: -12 }
       // Harmonium: three slightly detuned reeds (the beating of the reed banks; Timbre sets it), a bellows swell,
       // and full sustain while the key is held. The nasal reed colour comes from its default filter and EQ.
-      : id === 'harmonium' ? { ...base, type: 'sawtooth', count: 3, spread: 12, envelope: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.15 }, volume: -20 }
+      : id === 'harmonium' ? { ...base, type: 'sawtooth', count: 3, spread: 12, envelope: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.15 }, volume: -16 }
       // Bansuri: a nearly pure, soft tone (fundamental + a few weak overtones) with a breathy swell; its natural
       // vibrato comes from applyVibrato(), its airiness from the default chorus and reverb.
       : id === 'bansuri' ? { ...base, type: 'custom', partials: [1, 0.32, 0.12, 0.05, 0.02], envelope: { attack: 0.08, decay: 0.15, sustain: 0.85, release: 0.3 }, volume: -20 }
@@ -669,7 +695,7 @@ class AudioEngine {
   // Ramped: fader 4 drives this, and a hard step on every MIDI message zippers. -80 dB is silent enough for "0".
   setVolume(v01: number) {
     Tone.getDestination().volume.rampTo(v01 <= 0 ? -80 : Math.max(-80, 20 * Math.log10(v01)), RAMP)
-    const db = Math.max(0, (v01 - PUSH_FROM) / (1 - PUSH_FROM)) * PUSH_DB[this.light ? 'light' : 'full']
+    const db = Math.max(0, (v01 - PUSH_FROM) / (1 - PUSH_FROM)) * PUSH_DB
     this.chain?.push.gain.rampTo(10 ** (db / 20), RAMP)
   }
   /** Measured output latency in seconds when the browser reports it (Chrome does). */
