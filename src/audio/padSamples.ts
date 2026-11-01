@@ -104,12 +104,15 @@ export const sampleKey = persisted('sampler', { key: null as Binding | null })
 let pending: PadSample | null = null
 let target: number | null = null // a pad hit while recording ends the take and puts it there
 let stopTake: (() => void) | null = null
+let dropped = false // stopped while the mic was still opening: nothing to stop yet
+const endTake = () => { if (stopTake) stopTake(); else dropped = true }
 let pickTimer = 0
 
 function assign(k: number, s: PadSample | null) {
   audio.setPadSample(k, s)
   set({ names: state.names.map((n, i) => (i === k ? s?.name ?? null : n)) })
-  void idb('readwrite', (st) => (s ? st.put(s, k) : st.delete(k))).catch(() => set({ error: 'Could not save the sound on this device; it lasts until you reload.' }))
+  const saved: Promise<unknown> = s ? idb('readwrite', (st) => st.put(s, k)) : idb('readwrite', (st) => st.delete(k))
+  saved.catch(() => set({ error: 'Could not save the sound on this device; it lasts until you reload.' }))
 }
 
 /** Load the saved pad sounds into the engine (at startup). */
@@ -127,6 +130,7 @@ async function record(): Promise<{ rate: number; data: Float32Array<ArrayBuffer>
   await ctx.resume()
   // Effects for calls (echo cancelling, noise suppression, auto level) smear music: record the sound as it is.
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+  if (dropped) { stream.getTracks().forEach((t) => t.stop()); void ctx.close(); return { rate: ctx.sampleRate, data: null } }
   const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(2048, 1, 1)
   const take = new Take(ctx.sampleRate)
   return new Promise((done) => {
@@ -149,11 +153,12 @@ async function record(): Promise<{ rate: number; data: Float32Array<ArrayBuffer>
 
 /** The Sample button: start listening; pressed again, stop (keeping what was recorded) or drop a take nobody placed. */
 export async function pressSample() {
-  if (state.phase === 'listening' || state.phase === 'recording') { stopTake?.(); return }
+  if (state.phase === 'listening' || state.phase === 'recording') { endTake(); return }
   if (state.phase === 'pick') { pending = null; set({ phase: 'idle' }); return }
   await audio.start()
   if (audio.ctx.state !== 'running') { set({ error: 'Tap the screen once to turn on sound, then press Sample again.' }); return }
   target = null
+  dropped = false
   set({ phase: 'listening', error: '' })
   let rec: Awaited<ReturnType<typeof record>>
   try { rec = await record() } catch (e) {
@@ -172,8 +177,8 @@ export async function pressSample() {
 
 /** A pad was hit. Returns true when the hit belongs to the sampler and must not play. */
 export function padHit(k: number): boolean {
-  if (state.phase === 'listening') { stopTake?.(); assign(k, null); return false } // Sample, then a pad, no sound: its drum is back
-  if (state.phase === 'recording') { target = k; stopTake?.(); return true }
+  if (state.phase === 'listening') { endTake(); assign(k, null); return false } // Sample, then a pad, no sound: its drum is back
+  if (state.phase === 'recording') { target = k; endTake(); return true }
   if (state.phase === 'pick' && pending) { assign(k, pending); pending = null; set({ phase: 'idle' }); return false } // plays the new sound
   return false
 }

@@ -11,7 +11,10 @@ export interface TourCtx {
   tracks: number
   heard: number // keys and pads played since the tour began
   taught: boolean // Loop has a keyboard button
-  start: { instrument: InstrumentId; tracks: number; heard: number; loop: boolean }
+  bpm: number
+  quantized: number // times Quantize was pressed
+  padSounds: number // pads holding the player's own sound
+  start: { instrument: InstrumentId; tracks: number; heard: number; loop: boolean; quantized: number; padSounds: number }
 }
 
 export interface TourStep {
@@ -62,9 +65,70 @@ export const TOUR: TourStep[] = [
     done: (c) => c.loop !== c.start.loop },
 ]
 
+const stopRecording = (title: string, text: string): TourStep => ({ target: ['record'], title, text, done: (c) => c.state !== 'recording' })
+const tightened = (c: TourCtx) => c.quantized > c.start.quantized
+
+/** An original dance track, built layer by layer: a straight beat, a minor bass, off-beat stabs and a spoken word on a pad. */
+export const DANCE_TOUR: TourStep[] = [
+  { target: ['tempo'], title: 'Set the tempo',
+    text: 'Dance tracks sit around 120 beats a minute: slow enough to feel heavy, fast enough to move. Type 120 in Tempo.',
+    done: (c) => c.bpm >= 118 && c.bpm <= 126 },
+  { target: ['record'], title: 'Start with the beat',
+    text: 'Click ● Record. Four clicks count you in, and the clicks keep going so you can stay in time.',
+    done: (c) => c.state === 'recording' },
+  { title: 'Four on the floor',
+    text: 'Hit pad 1 (the kick, or key 1 on the computer) on every click, for 4 bars. Simple and steady: this is the heartbeat of the track.',
+    done: (c) => c.state === 'recording' && played(c, 14) },
+  stopRecording('Stop recording', 'Click Stop recording. The kick landed on a Drums track of its own.'),
+  { target: ['drums-track', 'quantize'], title: 'Tighten the beat',
+    text: 'Click the Drums track, then Quantize. Every hit snaps to the beat, so a machine-tight groove comes out of your hands.',
+    done: tightened },
+  { target: ['loop'], title: 'Turn on Loop',
+    text: 'Click 🔁 Loop so it says "Loop on". From now on each layer goes on top while the rest repeats.',
+    done: (c) => c.loop },
+  { target: ['record'], title: 'Add the clap',
+    text: 'Click ● Record. After the count-in, hit pad 5 (the clap) on clicks 2 and 4 of each bar. Boom CLAP boom CLAP.',
+    done: (c) => c.state === 'recording' && played(c, 8) },
+  { title: 'Add the off-beat hat',
+    text: 'Keep going, now with pad 3 (the closed hat) exactly between the kicks: boom tss boom tss. This is what makes people bounce.',
+    done: (c) => c.state === 'recording' && played(c, 12) },
+  stopRecording('Keep the beat', 'Click Stop recording.'),
+  { target: ['quantize'], title: 'Tighten it again',
+    text: 'Click Quantize once more, so the clap and hat sit with the kick.',
+    done: tightened },
+  { target: ['add-track', 'you-play'], title: 'Make room for a bass',
+    text: 'Click + Add track, then choose Synth lead under "You play". Press Oct − on your keyboard to reach the low notes.',
+    done: (c) => c.tracks > c.start.tracks && c.instrument === 'synth' },
+  { target: ['record'], title: 'Play a dark bass',
+    text: 'Click ● Record and play one long low note per bar: A, F, C, G. A minor loop like this gives the track its serious mood.',
+    done: (c) => c.state === 'recording' && played(c, 4) },
+  stopRecording('Keep the bass', 'Click Stop recording when the four notes are down.'),
+  { target: ['add-track', 'you-play'], title: 'Make room for chords',
+    text: 'Click + Add track, then choose Electric piano under "You play". Press Oct + to come back up.',
+    done: (c) => c.tracks > c.start.tracks && c.instrument === 'epiano' },
+  { target: ['record'], title: 'Short chord stabs',
+    text: 'Click ● Record. Follow the bass with short stabs between the kicks: A C E, then F A C, then C E G, then G B D. Leave gaps: space is what keeps it dark.',
+    done: (c) => c.state === 'recording' && played(c, 12) },
+  stopRecording('Keep the chords', 'Click Stop recording.'),
+  { target: ['sound'], title: 'Put your voice on a pad',
+    text: 'Open Sound, then Pad sounds. Press Sample, say one short word of your own, then hit pad 6. Your word is now an instrument. Close the panel afterwards.',
+    done: (c) => c.padSounds > c.start.padSounds },
+  { target: ['record'], title: 'Drop your voice in',
+    text: 'Click ● Record and hit pad 6 at the start of every second bar. Words repeated over a beat are a classic dance hook.',
+    done: (c) => c.state === 'recording' && played(c, 2) },
+  stopRecording('Finish the track', 'Click Stop recording, then ▶ Play to hear everything together.'),
+]
+
+export const TOURS = {
+  jam: { steps: TOUR, doneTitle: 'You made a jam!', doneText: 'That is the whole loop: record a part, loop it, play over it, add layers. Save it with Save, or export it as a MIDI file.' },
+  dance: { steps: DANCE_TOUR, doneTitle: 'You built a dance track!', doneText: 'Beat, bass, chords and your own voice: that is how these tracks are made. Mute layers to make a quiet break, then bring them back. Save it with Save.' },
+}
+export type TourId = keyof typeof TOURS
+
 /** The floating coach: one step at a time, the control to press lit up. Steps finish themselves when done. */
-export function JamCoach({ step, onStep, onEnd }: { step: number; onStep: (i: number) => void; onEnd: () => void }) {
-  const s = TOUR[step]
+export function JamCoach({ tour, step, onStep, onEnd }: { tour: TourId; step: number; onStep: (i: number) => void; onEnd: () => void }) {
+  const { steps, doneTitle, doneText } = TOURS[tour]
+  const s = steps[step]
   useEffect(() => {
     const els = (s?.target ?? []).map((t) => document.querySelector<HTMLElement>(`[data-tour="${t}"]`)).filter((e) => e !== null)
     els.forEach((e) => e.classList.add('tour-target'))
@@ -74,8 +138,8 @@ export function JamCoach({ step, onStep, onEnd }: { step: number; onStep: (i: nu
 
   if (!s) return (
     <div className="tour-coach card" role="dialog" aria-label="Jam tour finished">
-      <div className="row" style={{ gap: 10 }}><Mascot size={44} mood="star" /><b>You made a jam!</b></div>
-      <p>That is the whole loop: record a part, loop it, play over it, add layers. Save it with Save, or export it as a MIDI file.</p>
+      <div className="row" style={{ gap: 10 }}><Mascot size={44} mood="star" /><b>{doneTitle}</b></div>
+      <p>{doneText}</p>
       <button className="btn primary" onClick={onEnd}>Finish</button>
     </div>
   )
@@ -84,7 +148,7 @@ export function JamCoach({ step, onStep, onEnd }: { step: number; onStep: (i: nu
       <div className="row" style={{ gap: 10, alignItems: 'center' }}>
         <Mascot size={40} mood={s.target ? 'happy' : 'star'} />
         <div className="col" style={{ gap: 0 }}>
-          <span className="sub" style={{ fontSize: '0.75rem' }}>Step {step + 1} of {TOUR.length}{s.target ? '' : ' · on your keyboard 🎹'}</span>
+          <span className="sub" style={{ fontSize: '0.75rem' }}>Step {step + 1} of {steps.length}{s.target ? '' : ' · on your keyboard 🎹'}</span>
           <b>{s.title}</b>
         </div>
       </div>

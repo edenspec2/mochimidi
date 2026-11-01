@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { audio, INSTRUMENTS, type InstrumentId } from '../audio/audioEngine'
+import { padSampler } from '../audio/padSamples'
 import { quantize, Recorder } from '../engine/recorder'
 import { Session, type SessionState } from '../engine/session'
 import { bindingName, ccPresses, sameControl, type Binding } from '../midi/binding'
@@ -9,7 +10,7 @@ import { parseMidiFile, toMidiFile } from '../music/midiFile'
 import { currentDrums, PAD_PITCH } from '../music/drums'
 import { isBlack, noteNameOct, pc, scalePcs } from '../music/theory'
 import type { Lesson, NoteEvent } from '../music/types'
-import { JamCoach, TOUR, type TourCtx } from './JamTour'
+import { JamCoach, TOURS, type TourCtx, type TourId } from './JamTour'
 import { draft, library, persisted, settings, sound, useStore, type Composition, type Track } from '../store/store'
 
 const uid = () => Math.random().toString(36).slice(2, 10)
@@ -64,6 +65,9 @@ export function Create() {
   teaching.current = teach
   // Guided jam tour: the step shown, and keys/pads played since it began (each step checks what it needs).
   const [tour, setTour] = useState<number | null>(null)
+  const [tourId, setTourId] = useState<TourId>('jam')
+  const [quantized, setQuantized] = useState(0)
+  const padSounds = useSyncExternalStore(padSampler.subscribe, padSampler.get).names.filter(Boolean).length
   const [heard, setHeard] = useState(0)
   const touring = useRef(false)
   touring.current = tour !== null
@@ -299,14 +303,18 @@ export function Create() {
   const busy = state === 'playing' || state === 'recording'
 
   // Each tour step starts from a snapshot, then finishes itself once the player has done what it asks.
-  const tourStart = useRef<TourCtx['start']>({ instrument: st.instrument, tracks: 0, heard: 0, loop: false })
-  useEffect(() => { tourStart.current = { instrument: settings.get().instrument, tracks: comp.tracks.length, heard, loop: jam.get().loop } }, [tour]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tourStart = useRef<TourCtx['start']>({ instrument: st.instrument, tracks: 0, heard: 0, loop: false, quantized: 0, padSounds: 0 })
+  useEffect(() => { tourStart.current = { instrument: settings.get().instrument, tracks: comp.tracks.length, heard, loop: jam.get().loop, quantized, padSounds } }, [tour]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (tour === null || tour >= TOUR.length) return
-    const c: TourCtx = { instrument: st.instrument, state, loop: jm.loop, tracks: comp.tracks.length, heard, taught: !!jm.keys.loop, start: tourStart.current }
-    if (TOUR[tour].done(c)) setTour(tour + 1)
+    const steps = TOURS[tourId].steps
+    if (tour === null || tour >= steps.length) return
+    const c: TourCtx = { instrument: st.instrument, state, loop: jm.loop, tracks: comp.tracks.length, heard, taught: !!jm.keys.loop, bpm: comp.bpm, quantized, padSounds, start: tourStart.current }
+    if (steps[tour].done(c)) setTour(tour + 1)
   })
-  const startTour = () => { stop(); jam.set({ loop: false }); setHeard(0); setTour(0) }
+  const startTour = (id: TourId) => {
+    stop(); jam.set({ loop: false }); setHeard(0); setTourId(id); setTour(0)
+    if (id === 'dance') { settings.set({ padKit: 'standard' }); setComp({ ...newComposition(), name: 'My dance track' }); setActive(0) } // its steps name the standard kit's pads
+  }
   const discardOk = () => !(dirty || rec.current) || confirm(`Discard the unsaved changes to "${comp.name}"?`)
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
@@ -349,7 +357,7 @@ export function Create() {
             {INSTRUMENTS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
           </select>
         </label>
-        <label className="row" style={{ gap: 6 }}>Tempo <input type="number" min={30} max={240} value={comp.bpm} onChange={(e) => setComp({ ...comp, bpm: Math.max(30, Math.min(240, +e.target.value || 90)) }, false)} style={{ width: 70 }} disabled={busy} /> BPM</label>
+        <label data-tour="tempo" className="row" style={{ gap: 6 }}>Tempo <input type="number" min={30} max={240} value={comp.bpm} onChange={(e) => setComp({ ...comp, bpm: Math.max(30, Math.min(240, +e.target.value || 90)) }, false)} style={{ width: 70 }} disabled={busy} /> BPM</label>
         <select value={comp.timeSig[0]} onChange={(e) => setComp({ ...comp, timeSig: [+e.target.value, 4] })} aria-label="Time signature" disabled={busy}>
           {[2, 3, 4, 6].map((n) => <option key={n} value={n}>{n}/4</option>)}
         </select>
@@ -358,7 +366,7 @@ export function Create() {
         <label className="row" style={{ gap: 6 }}>Grid
           <select value={grid} onChange={(e) => setGrid(+e.target.value)}>{GRIDS.map((g) => <option key={g.l} value={g.v}>{g.l}</option>)}</select>
         </label>
-        <button className="btn small" onClick={() => updateTrack(active, (t) => ({ ...t, notes: quantize(t.notes, grid) }))} disabled={!track.notes.length} title="Snap the selected track to the grid">Quantize</button>
+        <button className="btn small" data-tour="quantize" onClick={() => { updateTrack(active, (t) => ({ ...t, notes: quantize(t.notes, grid) })); setQuantized((q) => q + 1) }} disabled={!track.notes.length} title="Snap the selected track to the grid">Quantize</button>
         <button className="btn small" onClick={() => updateTrack(active, (t) => ({ ...t, notes: quantize(t.notes, grid, 0.5) }))} disabled={!track.notes.length} title="Move notes half-way to the grid – tighter but still human">Quantize 50%</button>
         <label className="row" style={{ gap: 6 }}>Zoom <input type="range" min={0.5} max={2.5} step={0.1} value={zoom} onChange={(e) => setZoom(+e.target.value)} /></label>
         {sel !== null && track.notes[sel] && (
@@ -368,7 +376,8 @@ export function Create() {
 
       <details className="card" open style={{ padding: 14 }}>
         <summary style={{ cursor: 'pointer' }}><b>🎛 Jam: loop a part, play over it</b> <span className="sub">– how to layer sounds, step by step</span></summary>
-        <button className="btn primary small" style={{ marginTop: 10 }} onClick={startTour} disabled={tour !== null}>▶ Show me step by step (2 minutes)</button>
+        <button className="btn primary small" style={{ marginTop: 10 }} onClick={() => startTour('jam')} disabled={tour !== null}>▶ Show me step by step (2 minutes)</button>
+        <button className="btn small" style={{ marginTop: 10, marginLeft: 8 }} onClick={() => { if (discardOk()) startTour('dance') }} disabled={tour !== null}>🕺 Build a dance track (10 minutes)</button>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, marginTop: 10 }}>
           <ol className="sub" style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.9rem' }}>
               <li>Pick a sound under <b>You play</b> (try Soft strings).</li>
@@ -400,7 +409,7 @@ export function Create() {
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 14 }}>
         <div className="col">
           {comp.tracks.map((t, i) => (
-            <div key={t.id} className="card col" style={{ padding: 12, gap: 6, borderColor: i === active ? TRACK_COLORS[i % 5] : undefined, cursor: 'pointer' }} onClick={() => { setActive(i); setSel(null) }}>
+            <div key={t.id} data-tour={t.drums ? 'drums-track' : undefined} className="card col" style={{ padding: 12, gap: 6, borderColor: i === active ? TRACK_COLORS[i % 5] : undefined, cursor: 'pointer' }} onClick={() => { setActive(i); setSel(null) }}>
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <input type="text" value={t.name} onChange={(e) => updateTrack(i, (x) => ({ ...x, name: e.target.value }), false)} style={{ width: 110, padding: '2px 6px' }} aria-label="Track name" />
                 <span className="row" style={{ gap: 4 }}>{t.drums && <span className="sub" title="Drum track: record with the pads">Drums</span>}<span className="dot" style={{ background: TRACK_COLORS[i % 5] }} /></span>
@@ -474,7 +483,7 @@ export function Create() {
           </div>
         </div>
       </div>
-      {tour !== null && <JamCoach step={tour} onStep={setTour} onEnd={() => setTour(null)} />}
+      {tour !== null && <JamCoach tour={tourId} step={tour} onStep={setTour} onEnd={() => setTour(null)} />}
     </div>
   )
 }
