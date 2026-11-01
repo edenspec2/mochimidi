@@ -28,6 +28,15 @@ vi.mock('tone', () => {
   }
 })
 
+it('keeps a soft pad hit clearly under a hard one, but audible', async () => {
+  const { padGain } = await import('../src/audio/audioEngine')
+  const { padVel } = await import('../src/midi/midiInput')
+  const db = (rawVel: number) => 20 * Math.log10(padGain(padVel(rawVel, 'light')))
+  expect(db(127)).toBeCloseTo(0, 5)
+  expect(db(20)).toBeLessThan(-8) // about twice as quiet to the ear
+  expect(db(1)).toBeGreaterThan(-18)
+})
+
 it('renders each metal hit once, away from the live context, and keeps it when the kit is dropped', async () => {
   vi.stubGlobal('window', globalThis)
   vi.stubGlobal('localStorage', { getItem: (k: string) => (k === 'pianoapp.v1.engine' ? 'full' : null), setItem: () => {} })

@@ -20,6 +20,9 @@ describe('kirtan accompaniment', () => {
     kit.id = 'kirtan'
     expect(currentDrums()).toBe(KIRTAN_DRUMS)
     expect(noteName(200)).toBe('Ge (dholak bass)')
+    kit.id = 'dub'
+    expect(currentDrums()).toHaveLength(8)
+    expect(noteName(202)).toBe('Wobble')
     kit.id = 'standard'
   })
 })

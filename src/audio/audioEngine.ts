@@ -1,9 +1,10 @@
 import * as Tone from 'tone'
-import { kit as drumKit, type Kit } from '../music/drums'
+import { DUB_DRUMS, kit as drumKit, type Kit } from '../music/drums'
 import { toneName } from '../music/theory'
 import { defaults, effective, type Effective, type Params } from './sound'
 import { track } from '../analytics'
 import { NativeSynth, type Patch } from './nativeSynth'
+import { renderDub } from './dubKit'
 
 export type InstrumentId = 'piano' | 'epiano' | 'strings' | 'synth' | 'harmonium' | 'bansuri'
 export const INSTRUMENTS: { id: InstrumentId; label: string }[] = [
@@ -31,10 +32,10 @@ const REVERB_XFADE = 0.15 // s: from the old reverb to a newly rendered one
 /** A drum kit: what each pad plays, and every node it built (disposed together when the kit is dropped). */
 interface DrumSet { hits: ((time: number, vel: number) => void)[]; nodes: Tone.ToneAudioNode[] }
 /**
- * Drum velocity to level: gentler than the keys' curve. Pads send low velocities unless struck hard, and the keys'
- * curve put a velocity-50 tap ~11 dB under a full hit, which made the pads hard to hear. Here 30 → -6 dB, 100 → -1 dB.
+ * Drum velocity to level. Pad touch already lifts soft hits so they register; a shallower curve on top left a tap and a
+ * full hit ~4 dB apart, which sounds like no difference. Here velocity 50 → -9 dB, 100 → -3 dB, and a floor keeps taps audible.
  */
-const padGain = (vel: number) => 0.25 + 0.75 * (Math.max(1, vel) / 127) ** 0.8
+export const padGain = (vel: number) => 0.1 + 0.9 * (Math.max(1, vel) / 127) ** 1.4
 
 /** Seconds without a drum hit before the kits are disposed. */
 const KIT_IDLE = 30
@@ -141,8 +142,7 @@ class AudioEngine {
   private click: Tone.Synth | null = null
   private fallback: Voice | null = null
   private vibrato: Tone.Vibrato | null = null
-  private kit: DrumSet | null = null
-  private kirtanKit: DrumSet | null = null
+  private kits: Partial<Record<Kit, DrumSet>> = {}
   private kitTimer = 0
   private lastHit: number[] = []
   private mod = 0 // mod-strip position 0..1
@@ -411,22 +411,25 @@ class AudioEngine {
       const offline = new Tone.OfflineContext(2, Math.max(o.dur + o.release, o.decay) + 0.05, this.ctx.sampleRate)
       new Tone.MetalSynth({ context: offline, envelope: { attack: 0.001, decay: o.decay, release: o.release }, harmonicity: o.harmonicity, modulationIndex: o.modulationIndex, resonance: o.resonance, octaves: o.octaves, volume: o.volume })
         .connect(offline.rawContext.destination).triggerAttackRelease(o.freq, o.dur, 0, 1)
-      job = offline.render().then((b) => {
-        const buf = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate) // Tone's context plays only its own buffers
-        for (let c = 0; c < b.numberOfChannels; c++) buf.getChannelData(c).set(b.getChannelData(c))
-        return buf
-      })
+      job = offline.render().then((b) => this.playable(b))
       this.metalHits.set(key, job)
     }
     return job
   }
-  /** One shot of a buffer; its nodes go when it ends. */
+  /** Tone's context plays only buffers it made itself. */
+  private playable(b: { numberOfChannels: number; length: number; sampleRate: number; getChannelData(c: number): Float32Array }) {
+    const buf = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate)
+    for (let c = 0; c < b.numberOfChannels; c++) buf.getChannelData(c).set(b.getChannelData(c))
+    return buf
+  }
+  /** One shot of a buffer; its nodes go when it ends. Returns a way to cut it short. */
   private playBuffer(buf: AudioBuffer, level: number, time: number, to: Tone.ToneAudioNode) {
     const src = this.ctx.createBufferSource(), g = this.ctx.createGain()
     src.buffer = buf; g.gain.value = level
     src.connect(g); Tone.connect(g, to)
     src.onended = () => g.disconnect()
     src.start(Math.max(time, this.now()))
+    return (at: number) => { g.gain.setTargetAtTime(0, at, 0.005); src.stop(at + 0.05) }
   }
 
   /** A small synthesized kit (no samples, works offline): Kick, Snare, Closed hat, Open hat, Clap, Low tom, High tom, Crash. */
@@ -481,6 +484,19 @@ class AudioEngine {
     ] }
   }
 
+  /** Dubstep kit: recordings (see dubKit.ts), so it needs no synths. A bass cuts off the last bass, and a pad its own last hit, instead of piling up. */
+  private makeDubKit(): DrumSet {
+    const bus = new Tone.Gain(DRUM_BUS[this.light ? 'light' : 'full']).connect(this.chain!.drumsVol)
+    this.dubHits ??= DUB_DRUMS.map((_, k) => renderDub(k, this.ctx.sampleRate).then((b) => this.playable(b)))
+    const ringing: ((at: number) => void)[] = []
+    return { nodes: [bus], hits: this.dubHits.map((job, k) => (t: number, v: number) => void job.then((buf) => {
+      const slot = k === 3 ? 2 : k // wobble and growl
+      ringing[slot]?.(Math.max(t, this.now()))
+      ringing[slot] = this.playBuffer(buf, v, t, bus)
+    })) }
+  }
+  private dubHits: Promise<AudioBuffer>[] | null = null // outlives the kit, like the metal hits
+
   /** A sound the player recorded or loaded for pad `k` (see padSamples.ts); null gives the pad its drum back. */
   setPadSample(k: number, s: { rate: number; data: Float32Array<ArrayBuffer> } | null) { this.padSamples[k] = s; this.padBuffers[k] = null }
   private padSamples: ({ rate: number; data: Float32Array<ArrayBuffer> } | null)[] = []
@@ -498,16 +514,16 @@ class AudioEngine {
       return
     }
     kitId ??= drumKit.id
-    const hit = (kitId === 'kirtan' ? (this.kirtanKit ??= this.makeKirtanKit()) : (this.kit ??= this.makeKit())).hits[k]
+    const hit = (this.kits[kitId] ??= kitId === 'kirtan' ? this.makeKirtanKit() : kitId === 'dub' ? this.makeDubKit() : this.makeKit()).hits[k]
     if (!hit) return
     // A built kit costs audio time even when silent (~6 % of a PC's audio thread): after a quiet spell, drop both
     // kits; the next hit rebuilds one.
     clearTimeout(this.kitTimer)
     this.kitTimer = window.setTimeout(() => {
-      for (const set of [this.kit, this.kirtanKit]) set?.nodes.forEach((n) => n.dispose())
-      this.kit = this.kirtanKit = null
+      for (const set of Object.values(this.kits)) set.nodes.forEach((n) => n.dispose())
+      this.kits = {}
     }, KIT_IDLE * 1000)
-    const slot = kitId === 'kirtan' ? k + 8 : k
+    const slot = (kitId === 'kirtan' ? 8 : kitId === 'dub' ? 16 : 0) + k
     const t = Math.max(time, this.now(), (this.lastHit[slot] ?? 0) + 0.01)
     this.lastHit[slot] = t
     hit(t, padGain(vel))

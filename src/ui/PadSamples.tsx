@@ -3,7 +3,8 @@ import { audio } from '../audio/audioEngine'
 import { clearPad, loadPadFile, padSampler, pressSample, sampleKey, teachSampleKey } from '../audio/padSamples'
 import { bindingName } from '../midi/binding'
 import { currentDrums } from '../music/drums'
-import { useStore } from '../store/store'
+import { settings, useStore } from '../store/store'
+import type { Kit } from '../music/drums'
 
 const STATUS = {
   listening: '🎙 Listening… make your sound (or hit a pad to give it back its drum)',
@@ -17,6 +18,17 @@ export function PadSampleStatus() {
   return s.phase === 'idle' ? null : <div className="sample-status" role="status">{STATUS[s.phase]}</div>
 }
 
+const KIT_LABELS: Record<Kit, string> = { standard: 'Pads: drum kit', kirtan: 'Pads: dholak & kartals', dub: 'Pads: dubstep' }
+/** What the pads play. */
+export function PadKitPicker() {
+  const { padKit } = useStore(settings)
+  return (
+    <div className="seg" aria-label="Pads play">
+      {(Object.keys(KIT_LABELS) as Kit[]).map((id) => <button key={id} aria-pressed={padKit === id} className={padKit === id ? 'active' : ''} onClick={() => settings.set({ padKit: id })}>{KIT_LABELS[id]}</button>)}
+    </div>
+  )
+}
+
 /** Sound panel: record or load a sound onto a pad, teach the keyboard's Sample button, play or clear each pad. */
 export function PadSamples() {
   const s = useSyncExternalStore(padSampler.subscribe, padSampler.get)
@@ -25,6 +37,7 @@ export function PadSamples() {
   const drums = currentDrums()
   return (
     <>
+      <PadKitPicker />
       <p className="sp-hint">Press <b>Sample</b>, make a sound (a clap, your voice, a cup), then hit a pad: it plays your sound from then on.
         Sample, then a pad without making a sound, gives that pad its drum back. Teach a spare key or pad to do it all from the keyboard.</p>
       <div className="sp-row">

@@ -25,10 +25,21 @@ export const KIRTAN_DRUMS = [
   { name: 'Ghungroo', short: 'Gh', gm: 70, color: '#7ce0ff' },
   { name: 'Khol (deep)', short: 'Kh', gm: 60, color: '#ff6a8a' },
 ]
-export type Kit = 'standard' | 'kirtan'
+/** Dubstep kit: kick and snare keep their pads, so a beat still works when the kit is swapped. */
+export const DUB_DRUMS = [
+  { name: 'Sub kick', short: 'K', gm: 35, color: '#ff6a8a' },
+  { name: 'Dub snare', short: 'S', gm: 40, color: '#ffb35e' },
+  { name: 'Wobble', short: 'W', gm: 41, color: '#a98bff' },
+  { name: 'Growl', short: 'G', gm: 43, color: '#c3a9ff' },
+  { name: 'Laser', short: 'L', gm: 71, color: '#5ec8ff' },
+  { name: 'Sub drop', short: 'D', gm: 45, color: '#7ce0ff' },
+  { name: 'Riser', short: 'R', gm: 55, color: '#5df2a0' },
+  { name: 'Impact', short: 'I', gm: 57, color: '#ffe066' },
+]
+export type Kit = 'standard' | 'kirtan' | 'dub'
 /** The kit the pads and drum notes play right now (set from Settings, and by kirtan lessons while they're open). */
 export const kit: { id: Kit } = { id: 'standard' }
-export const currentDrums = () => (kit.id === 'kirtan' ? KIRTAN_DRUMS : DRUMS)
+export const currentDrums = () => ({ standard: DRUMS, kirtan: KIRTAN_DRUMS, dub: DUB_DRUMS })[kit.id]
 
 /** General MIDI drum note → nearest drum of our kit (for importing channel-10 parts). */
 export function gmToDrum(n: number): number {

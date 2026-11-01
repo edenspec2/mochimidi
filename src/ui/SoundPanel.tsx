@@ -12,7 +12,7 @@ import { identifyChord } from '../music/theory'
 import { ccMap, settings, sound, userPresets, useStore, type SoundState } from '../store/store'
 import { Knob } from './Knob'
 import './SoundPanel.css'
-import { PadSamples } from './PadSamples'
+import { PadKitPicker, PadSamples } from './PadSamples'
 
 const useInst = () => useSyncExternalStore(settings.subscribe, () => settings.get().instrument)
 const setSound = (patch: Partial<SoundState>) => sound.set(patch)
@@ -234,9 +234,7 @@ function KirtanSection() {
       </div>
       <div className="sp-row">
         <Knob label="Level" value={k.level} min={0} max={1} norm={k.level} text={`${Math.round(k.level * 100)}%`} onNorm={(n) => set({ level: n })} onReset={() => set({ level: 0.7 })} />
-        <div className="seg" aria-label="Pads play">
-          {(['standard', 'kirtan'] as const).map((id) => <button key={id} aria-pressed={st.padKit === id} className={st.padKit === id ? 'active' : ''} onClick={() => settings.set({ padKit: id })}>{id === 'standard' ? 'Pads: drum kit' : 'Pads: dholak & kartals'}</button>)}
-        </div>
+        <PadKitPicker />
       </div>
     </Section>
   )
@@ -282,7 +280,7 @@ export function SoundPanel({ compact }: { compact?: boolean }) {
       {synth && <Section title="Synth"><div className="sp-grid">{inst === 'synth' && k('glide')}{k('vibratoRate')}</div></Section>}
       <Section title="Mix" open={!compact}><div className="sp-grid">{k('master')}{k('keysVol')}{k('drumsVol')}</div></Section>
       <KirtanSection />
-      <Section title="Pad sounds: record your own"><PadSamples /></Section>
+      <Section title="Pad sounds"><PadSamples /></Section>
       <PerformSection />
       <LearnSection learnMode={learnMode} setLearnMode={setLearnMode} />
       {!audio.started && <p className="sp-hint">Sound starts with your first key or click; your settings are applied then.</p>}
