@@ -17,8 +17,10 @@ export interface Patch {
   envelope: { attack: number; decay: number; sustain: number; release: number }
   volume: number // dB
   portamento: number // s: glide from the previous note
+  /** A filter on each note, in multiples of its pitch, sweeping `from` → `to`: it travels with the voice, unlike the shared chain's filter, so a track keeps its sound. */
+  filter?: { from: number; to: number; decay: number; Q: number }
 }
-type Settable = { envelope?: Partial<Patch['envelope']>; detune?: number; modulationIndex?: number; harmonicity?: number; portamento?: number; oscillator?: { spread?: number } }
+type Settable = { envelope?: Partial<Patch['envelope']>; detune?: number; open?: number; modulationIndex?: number; harmonicity?: number; portamento?: number; oscillator?: { spread?: number } }
 
 interface Note { name: string; oscs: OscillatorNode[]; offsets: number[]; nodes: AudioNode[]; amp: GainNode; modEnv?: GainNode; released: boolean }
 
@@ -40,6 +42,7 @@ export class NativeSynth {
   maxPolyphony = 32
   private notes: Note[] = []
   private detune = 0
+  private open = 1 // scales `filter`: the Timbre knob
   private lastHz = 0
   private wave: PeriodicWave | null = null
   private ctx: BaseAudioContext
@@ -66,6 +69,7 @@ export class NativeSynth {
     if (o.modulationIndex !== undefined) this.p.modulationIndex = o.modulationIndex
     if (o.harmonicity !== undefined) this.p.harmonicity = o.harmonicity
     if (o.portamento !== undefined) this.p.portamento = o.portamento
+    if (o.open !== undefined) this.open = o.open
     if (o.oscillator?.spread !== undefined) this.p.spread = o.oscillator.spread
     if (o.detune !== undefined) {
       this.detune = o.detune
@@ -112,7 +116,14 @@ export class NativeSynth {
         o.connect(amp)
       }
       this.envelope(amp.gain, time, velocity * (c > 1 ? db(-6 - c * 1.1) : 1))
-      amp.connect(this.output)
+      if (p.filter) {
+        const f = ctx.createBiquadFilter(), top = Math.min(18000, hz * p.filter.from * this.open * (0.5 + velocity * 0.5)) // a harder note opens brighter
+        f.type = 'lowpass'; f.Q.value = p.filter.Q
+        f.frequency.setValueAtTime(top, time)
+        f.frequency.setTargetAtTime(Math.min(top, hz * p.filter.to * this.open), time, p.filter.decay / 3)
+        n.nodes.push(f)
+        amp.connect(f).connect(this.output)
+      } else amp.connect(this.output)
     } else {
       const carrier = osc(p.type, hz), mod = osc('square', hz * p.harmonicity)
       const modEnv = ctx.createGain()

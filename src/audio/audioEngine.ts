@@ -6,7 +6,7 @@ import { track } from '../analytics'
 import { NativeSynth, type Patch } from './nativeSynth'
 import { RENDERED_KITS, renderKit, type RenderedKit } from './renderedKits'
 
-export type InstrumentId = 'piano' | 'epiano' | 'strings' | 'synth' | 'harmonium' | 'bansuri'
+export type InstrumentId = 'piano' | 'epiano' | 'strings' | 'synth' | 'harmonium' | 'bansuri' | 'bass' | 'acid' | 'stab' | 'organ' | 'pluck'
 export const INSTRUMENTS: { id: InstrumentId; label: string }[] = [
   { id: 'piano', label: 'Grand piano' },
   { id: 'epiano', label: 'Electric piano' },
@@ -14,6 +14,11 @@ export const INSTRUMENTS: { id: InstrumentId; label: string }[] = [
   { id: 'synth', label: 'Synth lead' },
   { id: 'harmonium', label: 'Harmonium' },
   { id: 'bansuri', label: 'Bansuri flute' },
+  { id: 'bass', label: 'Deep bass' },
+  { id: 'acid', label: 'Acid bass' },
+  { id: 'stab', label: 'Chord stab' },
+  { id: 'organ', label: 'House organ' },
+  { id: 'pluck', label: 'Minimal pluck' },
 ]
 
 type Voice = Tone.Sampler | NativeSynth
@@ -379,7 +384,8 @@ class AudioEngine {
       : { envelope: { attack: e.attack, decay: e.decay, sustain: e.sustain, release: e.release } }
     if (id === 'epiano') opts.modulationIndex = e.modIndex
     if (id === 'strings') opts.harmonicity = e.harmonicity
-    if (id === 'synth') { opts.portamento = e.glide; opts.oscillator = { spread: e.spread } }
+    if (id === 'synth' || id === 'acid') { opts.portamento = e.glide; opts.oscillator = { spread: e.spread } }
+    if (v instanceof NativeSynth) opts.open = e.open
     if (id === 'harmonium') opts.oscillator = { spread: e.spread }
     const key = JSON.stringify(opts)
     if (this.voiceKeys.get(v) === key) return
@@ -498,8 +504,8 @@ class AudioEngine {
     })) }
   }
   private renderedHits: Partial<Record<RenderedKit, Promise<AudioBuffer>[]>> = {} // outlive the kit, like the metal hits
-  /** The epic kit takes seconds to render, so that starts when a kit is chosen, not on its first hit. */
-  preloadKit(id: Kit) { if (id === 'dub' || id === 'epic') void renderKit(id, Tone.getContext().sampleRate) }
+  /** A rendered kit can take seconds, so that starts when a kit is chosen, not on its first hit. */
+  preloadKit(id: Kit) { if (id !== 'standard' && id !== 'kirtan') void renderKit(id, Tone.getContext().sampleRate) }
 
   /** A sound the player recorded or loaded for pad `k` (see padSamples.ts); null gives the pad its drum back. */
   setPadSample(k: number, s: { rate: number; data: Float32Array<ArrayBuffer> } | null) { this.padSamples[k] = s; this.padBuffers[k] = null }
@@ -636,6 +642,13 @@ class AudioEngine {
       // Bansuri: a nearly pure, soft tone (fundamental + a few weak overtones) with a breathy swell; its natural
       // vibrato comes from applyVibrato(), its airiness from the default chorus and reverb.
       : id === 'bansuri' ? { ...base, type: 'custom', partials: [1, 0.32, 0.12, 0.05, 0.02], envelope: { attack: 0.08, decay: 0.15, sustain: 0.85, release: 0.3 }, volume: -20 }
+      : id === 'bass' ? { ...base, type: 'sawtooth', filter: { from: 6, to: 2.5, decay: 0.12, Q: 1 }, envelope: { attack: 0.003, decay: 0.25, sustain: 0.6, release: 0.08 }, volume: -10 }
+      // Acid: a sharp resonant sweep on every note.
+      : id === 'acid' ? { ...base, type: 'sawtooth', filter: { from: 16, to: 1.5, decay: 0.16, Q: 11 }, envelope: { attack: 0.002, decay: 0.2, sustain: 0.5, release: 0.06 }, volume: -14 }
+      : id === 'stab' ? { ...base, type: 'sawtooth', count: 3, spread: 14, filter: { from: 9, to: 3, decay: 0.14, Q: 2 }, envelope: { attack: 0.002, decay: 0.25, sustain: 0, release: 0.15 }, volume: -2 }
+      // Organ bass: stacked drawbars, the classic house shape of odd partials on top of the fundamental.
+      : id === 'organ' ? { ...base, type: 'custom', partials: [1, 0.7, 0.3, 0.5, 0.1, 0.2, 0, 0.15], filter: { from: 14, to: 14, decay: 0.1, Q: 0.7 }, envelope: { attack: 0.003, decay: 0.15, sustain: 0.75, release: 0.05 }, volume: -12 }
+      : id === 'pluck' ? { ...base, type: 'square', filter: { from: 10, to: 2, decay: 0.05, Q: 7 }, envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.08 }, volume: -14 }
       // piano fallback
       : { ...base, type: 'triangle', envelope: { attack: 0.003, decay: 1.4, sustain: 0.1, release: 0.6 }, volume: -8 }
     const v = new NativeSynth(this.ctx, patch)

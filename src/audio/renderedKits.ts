@@ -1,4 +1,4 @@
-// The dubstep and epic pads: original sounds built from oscillators and noise, rendered once, so playing them costs almost nothing.
+// The dubstep, epic and house pads: original sounds built from oscillators and noise, rendered once, so playing them costs almost nothing.
 
 const sweep = (p: AudioParam, from: number, to: number, sec: number, at = 0) => { p.setValueAtTime(from, at); p.exponentialRampToValueAtTime(to, at + sec) }
 const osc = (c: OfflineAudioContext, type: OscillatorType, hz: number) => { const o = c.createOscillator(); o.type = type; o.frequency.value = hz; o.start(); return o }
@@ -23,7 +23,7 @@ const hall = (c: OfflineAudioContext, sec: number, wet: number, out: AudioNode) 
 }
 
 /** `cut`: a new hit stops the last sound of the same group, so long sounds don't pile up into mud. */
-interface Sound { sec: number; cut?: number; make: (c: OfflineAudioContext, out: AudioNode) => void }
+interface Sound { sec: number; cut?: number; peak?: number; make: (c: OfflineAudioContext, out: AudioNode) => void }
 
 /** Pad order matches DUB_DRUMS. */
 const DUB: Sound[] = [
@@ -141,22 +141,63 @@ const EPIC: Sound[] = [
   } },
 ]
 
-export const RENDERED_KITS = { dub: DUB, epic: EPIC }
+/** Pad order matches HOUSE_DRUMS. `peak` sets each sound under the kick, the way a mixed kit sits; the two hats cut each other, as on a real hi-hat. */
+const HOUSE: Sound[] = [
+  { sec: 0.5, make: (c, out) => { // Kick: tight and round, a short pitch drop with a small click
+    const body = osc(c, 'sine', 180); sweep(body.frequency, 180, 52, 0.07)
+    wire(body, drive(c, 2), decay(c, 0.36), out)
+    wire(noise(c), filter(c, 'highpass', 4000), decay(c, 0.008), level(c, 0.3), out)
+  } },
+  { sec: 0.15, peak: 0.6, make: (c, out) => { // Rim: two tones and a tick, gone in a moment
+    const mix = level(c)
+    wire(osc(c, 'triangle', 1700), level(c, 0.6), mix); wire(osc(c, 'square', 450), level(c, 0.4), mix)
+    wire(mix, filter(c, 'bandpass', 1500, 1.5), decay(c, 0.035), drive(c, 2), out)
+  } },
+  { sec: 0.12, cut: 1, peak: 0.45, make: (c, out) => { // Closed hat
+    wire(noise(c), filter(c, 'highpass', 8000), decay(c, 0.06), out)
+  } },
+  { sec: 0.45, cut: 1, peak: 0.4, make: (c, out) => { // Open hat
+    wire(noise(c), filter(c, 'highpass', 7000), decay(c, 0.36), out)
+  } },
+  { sec: 0.7, peak: 0.75, make: (c, out) => { // Clap: three quick slaps, then the room
+    const bursts = level(c, 0), t = c.currentTime
+    for (const at of [0, 0.012, 0.024]) { bursts.gain.setValueAtTime(1, t + at); bursts.gain.exponentialRampToValueAtTime(0.05, t + at + 0.011) }
+    bursts.gain.setValueAtTime(0.7, t + 0.036); bursts.gain.exponentialRampToValueAtTime(0.001, t + 0.26)
+    wire(noise(c), filter(c, 'bandpass', 1300, 1.2), bursts, hall(c, 0.5, 0.2, out))
+  } },
+  { sec: 0.16, peak: 0.3, make: (c, out) => { // Shaker: a soft rise and fall of bright noise
+    const swell = level(c, 0); swell.gain.setValueAtTime(0, 0); swell.gain.linearRampToValueAtTime(1, 0.02); swell.gain.exponentialRampToValueAtTime(0.001, 0.14)
+    wire(noise(c), filter(c, 'bandpass', 6500, 1), swell, out)
+  } },
+  { sec: 0.7, peak: 0.55, make: (c, out) => { // Blip: the small pitched tick minimal techno is built on, with an echo
+    const tone = osc(c, 'sine', 620); sweep(tone.frequency, 620, 420, 0.04)
+    const echo = c.createDelay(0.3), back = level(c, 0.35), shot = level(c); echo.delayTime.value = 0.18
+    wire(tone, decay(c, 0.09), shot); wire(shot, out); wire(shot, echo, back, echo); wire(echo, level(c, 0.5), out)
+  } },
+  { sec: 1.4, peak: 0.3, make: (c, out) => { // Ride: metal partials and bright noise, a long even wash
+    const mix = level(c)
+    for (const hz of [3150, 4230, 5410, 6720]) wire(osc(c, 'square', hz), level(c, 0.12), mix)
+    wire(noise(c), filter(c, 'highpass', 6000), level(c, 0.25), mix)
+    wire(mix, filter(c, 'highpass', 3000), decay(c, 1.2), out)
+  } },
+]
+
+export const RENDERED_KITS = { dub: DUB, epic: EPIC, house: HOUSE }
 export type RenderedKit = keyof typeof RENDERED_KITS
 
 const rendered: Partial<Record<RenderedKit, Promise<AudioBuffer>[]>> = {}
 /** Every pad of `kit`, rendered at most once. */
 export const renderKit = (kit: RenderedKit, rate: number) => (rendered[kit] ??= RENDERED_KITS[kit].map((_, k) => renderHit(kit, k, rate)))
 
-/** Pad `k` as a recording, its peak matching the standard kick's so the kits can be swapped. */
+/** Pad `k` as a recording; at the default peak it matches the standard kick, so the kits can be swapped. */
 async function renderHit(kit: RenderedKit, k: number, rate: number) {
-  const { sec, make } = RENDERED_KITS[kit][k]
+  const { sec, make, peak: top = 0.9 } = RENDERED_KITS[kit][k]
   const c = new OfflineAudioContext(2, Math.round(sec * rate), rate)
   make(c, c.destination)
   const b = await c.startRendering(), chs = [b.getChannelData(0), b.getChannelData(1)]
   let peak = 0
   for (const d of chs) for (const v of d) peak = Math.max(peak, Math.abs(v))
   const fade = Math.round(0.02 * rate)
-  for (const d of chs) for (let i = 0; i < d.length; i++) d[i] *= (0.9 / peak) * Math.min(1, (d.length - 1 - i) / fade)
+  for (const d of chs) for (let i = 0; i < d.length; i++) d[i] *= (top / peak) * Math.min(1, (d.length - 1 - i) / fade)
   return b
 }

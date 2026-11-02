@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { arpPattern, chordShape, randomStep, transposeShape } from '../src/audio/arp'
+import { INSTRUMENTS, type InstrumentId } from '../src/audio/audioEngine'
 import { autoTarget, ccFor, clearCC, decodeCC, detectEncoding, getParam, handleCC, learn, loadPreset, mapCC, relDelta, saveUserPreset, setCCMode, setParam, WIZARD, deleteUserPreset, renameUserPreset, allPresets, currentParams } from '../src/audio/controls'
 import { defaults, effective, FACTORY_PRESETS, fromNorm, PARAM_IDS, PARAMS, resolve, toNorm, type Params } from '../src/audio/sound'
 import { MidiInput, parseMessage, type CCEvent, type InputEvent } from '../src/midi/midiInput'
@@ -56,12 +57,13 @@ describe('relative / absolute decoding', () => {
 })
 
 describe('macros', () => {
-  const at = (id: keyof Params, v: number, inst: 'piano' | 'epiano' | 'strings' | 'synth' | 'harmonium' | 'bansuri' = 'synth') => effective({ ...defaults(inst), [id]: v }, inst)
+  const at = (id: keyof Params, v: number, inst: InstrumentId = 'synth') => effective({ ...defaults(inst), [id]: v }, inst)
   const steps = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]
   const mono = (xs: number[]) => xs.every((x, i) => i === 0 || x >= xs[i - 1])
   it('leave the designed sound untouched at their default (0.5)', () => {
-    for (const inst of ['piano', 'epiano', 'strings', 'synth', 'harmonium', 'bansuri'] as const) {
+    for (const inst of INSTRUMENTS.map((i) => i.id)) {
       const d = defaults(inst), e = effective(d, inst)
+      expect(e.open).toBe(1)
       expect(e.cutoff).toBe(d.cutoff); expect(e.attack).toBeCloseTo(d.attack); expect(e.release).toBeCloseTo(d.release)
       expect(e.reverbDecay).toBeCloseTo(d.reverbDecay); expect(e.chorus).toBe(d.chorus); expect(e.eqHigh).toBe(d.eqHigh); expect(e.drive).toBe(d.drive)
     }

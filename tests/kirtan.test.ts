@@ -26,6 +26,9 @@ describe('kirtan accompaniment', () => {
     kit.id = 'epic'
     expect(currentDrums()).toHaveLength(8)
     expect(noteName(202)).toBe('Braam')
+    kit.id = 'house'
+    expect(currentDrums()).toHaveLength(8)
+    expect(noteName(204)).toBe('Clap') // on the standard kit's clap pad
     kit.id = 'standard'
   })
 })

@@ -20,6 +20,7 @@ function fakeCtx() {
     createGain: () => node('gain', { gain: param(1) }),
     createOscillator: () => node('osc', { type: 'sine', wave: null, frequency: param(440), detune: param(0), started: -1, stopped: -1, setPeriodicWave(w: unknown) { this.wave = w }, start(t: number) { this.started = t }, stop(t: number) { this.stopped = t } }),
     createPeriodicWave: () => ({}),
+    createBiquadFilter: () => node('filter', { type: 'lowpass', frequency: param(350), Q: param(1) }),
   }
   return { ctx: ctx as unknown as BaseAudioContext, made }
 }
@@ -28,6 +29,20 @@ const oscs = (made: Record<string, unknown>[]) => made.filter((n) => n.kind === 
 const lastSet = (calls: Call[]) => calls.filter((c) => c[0] === 'setValueAtTime').at(-1)?.[1]
 
 describe('NativeSynth', () => {
+  it('sweeps a filter on each note in multiples of its pitch, opened further by Timbre and a harder note', () => {
+    const { ctx, made } = fakeCtx()
+    const s = new NativeSynth(ctx, { ...base, filter: { from: 16, to: 2, decay: 0.15, Q: 10 } })
+    const f = () => made.filter((n) => n.kind === 'filter').at(-1) as unknown as { Q: { value: number }; frequency: { calls: Call[] }; to: unknown[] }
+    s.triggerAttack(69, 1, 1)
+    expect(f().Q.value).toBe(10)
+    expect(f().frequency.calls[0]).toEqual(['setValueAtTime', 7040, 1])
+    expect(f().frequency.calls[1].slice(0, 3)).toEqual(['setTargetAtTime', 880, 1])
+    expect(f().to).toContain(s.output)
+    s.set({ open: 2 })
+    s.triggerAttack(69, 1, 0)
+    expect(f().frequency.calls[0][1]).toBe(7040) // twice as open, half as hard
+  })
+
   it('reads note names and MIDI numbers', () => {
     expect(noteHz('A4')).toBe(440)
     expect(noteHz(69)).toBe(440)

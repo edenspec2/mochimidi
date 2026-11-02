@@ -66,6 +66,12 @@ const INIT: Record<InstrumentId, Partial<Params>> = {
   harmonium: { attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.15, cutoff: 2600, resonance: 1.2, eqMid: 2, tremolo: 0.1, lfoRate: 4.5, reverbMix: 0.12 },
   // Bamboo flute: soft breathy swell, airy chorus and a hall-like reverb; its vibrato is built into the engine.
   bansuri: { attack: 0.08, decay: 0.15, sustain: 0.85, release: 0.3, cutoff: 5000, chorus: 0.12, lfoRate: 0.8, reverbMix: 0.28, reverbDecay: 2.8, vibratoRate: 5 },
+  // House and techno voices: their filter sweeps are built into each note, so these match the patches in the engine.
+  bass: { attack: 0.003, decay: 0.25, sustain: 0.6, release: 0.08 },
+  acid: { attack: 0.002, decay: 0.2, sustain: 0.5, release: 0.06 },
+  stab: { attack: 0.002, decay: 0.25, sustain: 0, release: 0.15, reverbMix: 0.18 },
+  organ: { attack: 0.003, decay: 0.15, sustain: 0.75, release: 0.05, reverbMix: 0.1 },
+  pluck: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.08, reverbMix: 0.15 },
 }
 const DEFAULTS = Object.fromEntries(Object.entries(INIT).map(([k, v]) => [k, { ...BASE, ...v }])) as Record<InstrumentId, Params>
 export const defaults = (inst: InstrumentId): Params => DEFAULTS[inst] ?? BASE
@@ -104,7 +110,7 @@ export interface Effective {
   reverbDecay: number; reverbPreDelay: number; reverbMix: number
   eqLow: number; eqMid: number; eqHigh: number; width: number; glide: number; vibratoRate: number
   keysVol: number; drumsVol: number
-  modIndex: number; harmonicity: number; spread: number // instrument timbre
+  modIndex: number; harmonicity: number; spread: number; open: number // instrument timbre
 }
 export function effective(p: Params, inst: InstrumentId): Effective {
   const b = p.brightness - 0.5, t = p.timbre - 0.5, m = p.time - 0.5, v = p.movement - 0.5
@@ -143,6 +149,7 @@ export function effective(p: Params, inst: InstrumentId): Effective {
     modIndex: 6 * Math.pow(2, t * 3), // e-piano FM index: 2.1 … 17
     harmonicity: Math.round(1 + p.timbre * 3), // strings AM: whole ratios 1–4 stay harmonic
     spread: p.timbre * (inst === 'harmonium' ? 24 : 40), // detune of the 3 stacked saws (harmonium: the reed beating), in cents
+    open: Math.pow(4, t * 2), // house and techno voices: their note filter opens ×0.25 … ×4
   }
 }
 
@@ -172,6 +179,16 @@ export const FACTORY_PRESETS: Preset[] = [
   { name: 'Temple Bansuri', instrument: 'bansuri', params: { reverbMix: 0.42, reverbDecay: 4.5, reverbPreDelay: 0.03, width: 0.8, release: 0.5 } },
   { name: 'Close & Breathy', instrument: 'bansuri', params: { cutoff: 7000, chorus: 0.25, reverbMix: 0.15, attack: 0.05 } },
   { name: 'Musette Accordion', instrument: 'harmonium', params: { timbre: 0.9, cutoff: 3800, eqMid: 4, tremolo: 0.12, lfoRate: 6, reverbMix: 0.1 } },
+  { name: 'Init', instrument: 'bass', params: {} },
+  { name: 'Rolling Sub', instrument: 'bass', params: { cutoff: 500, sustain: 0.8, drive: 0.15 } },
+  { name: 'Init', instrument: 'acid', params: {} },
+  { name: 'Squelch', instrument: 'acid', params: { timbre: 0.7, glide: 0.05, drive: 0.45, delayMix: 0.18, delayDiv: 3, delayFeedback: 0.35 } },
+  { name: 'Init', instrument: 'stab', params: {} },
+  { name: 'Dub Chord', instrument: 'stab', params: { delayMix: 0.35, delayDiv: 3, delayFeedback: 0.55, reverbMix: 0.3, reverbDecay: 4, cutoff: 3000 } },
+  { name: 'Init', instrument: 'organ', params: {} },
+  { name: 'Warehouse Organ', instrument: 'organ', params: { drive: 0.2, cutoff: 3500, reverbMix: 0.2 } },
+  { name: 'Init', instrument: 'pluck', params: {} },
+  { name: 'Tape Echo', instrument: 'pluck', params: { delayMix: 0.4, delayDiv: 3, delayFeedback: 0.5, cutoff: 5000 } },
 ]
 
 /** Save or overwrite a user preset by name (per instrument). Returns a new list. */

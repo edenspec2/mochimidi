@@ -47,10 +47,21 @@ export const EPIC_DRUMS = [
   { name: 'Gong', short: 'G', gm: 49, color: '#5df2a0' },
   { name: 'Whoosh', short: 'W', gm: 55, color: '#ffe066' },
 ]
-export type Kit = 'standard' | 'kirtan' | 'dub' | 'epic'
+/** House and techno kit: its hats and clap sit on the standard kit's pads, so a beat carries straight over. */
+export const HOUSE_DRUMS = [
+  { name: 'Kick', short: 'K', gm: 36, color: '#ff6a8a' },
+  { name: 'Rim', short: 'R', gm: 37, color: '#ffb35e' },
+  { name: 'Closed hat', short: 'H', gm: 42, color: '#5ec8ff' },
+  { name: 'Open hat', short: 'O', gm: 46, color: '#7ce0ff' },
+  { name: 'Clap', short: 'C', gm: 39, color: '#ffe066' },
+  { name: 'Shaker', short: 'Sh', gm: 70, color: '#a98bff' },
+  { name: 'Blip', short: 'B', gm: 76, color: '#c3a9ff' },
+  { name: 'Ride', short: 'Rd', gm: 51, color: '#5df2a0' },
+]
+export type Kit = 'standard' | 'kirtan' | 'dub' | 'epic' | 'house'
 /** The kit the pads and drum notes play right now (set from Settings, and by kirtan lessons while they're open). */
 export const kit: { id: Kit } = { id: 'standard' }
-export const currentDrums = () => ({ standard: DRUMS, kirtan: KIRTAN_DRUMS, dub: DUB_DRUMS, epic: EPIC_DRUMS })[kit.id]
+export const currentDrums = () => ({ standard: DRUMS, kirtan: KIRTAN_DRUMS, dub: DUB_DRUMS, epic: EPIC_DRUMS, house: HOUSE_DRUMS })[kit.id]
 
 /** General MIDI drum note → nearest drum of our kit (for importing channel-10 parts). */
 export function gmToDrum(n: number): number {
