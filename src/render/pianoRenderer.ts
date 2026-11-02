@@ -56,14 +56,15 @@ interface Palette {
   label: string // text on a note
   miss: string; ok: string; bad: string; warn: string; perfect: string
   judgeHalo: string; milestone: string; dust: string
+  ink: string // the outline of a note
   additive: boolean // 'lighter' blending only looks right on a dark stage
   autoAlpha: number // notes the app plays itself
 }
-// Kawaii: candy notes (sky→lavender right hand, peach→pink left), a cream-and-plum keyboard, pink hit line.
+// Anime: inked candy notes (sky→lavender right hand, peach→pink left), a cream-and-plum keyboard, pink hit line.
 const PALETTES: Record<RenderTheme, Palette> = {
   light: {
     hands: { R: ['#7fd0ff', '#a98bff'], L: ['#ffbd8a', '#ff7eb6'] },
-    stage: ['#fff9fc', '#fdeaf4'],
+    stage: ['#dff3ff', '#ffeaf4'],
     lane: 'rgba(232,80,143,0.03)', cLine: 'rgba(232,80,143,0.12)', beat: 'rgba(150,70,130,0.06)', bar: 'rgba(150,70,130,0.15)', barText: 'rgba(120,60,110,0.5)', loop: 'rgba(201,167,255,0.14)',
     floor: 'rgba(255,111,168,0.2)',
     line: 'rgba(255,111,168,0.85)', lineWait: 'rgba(255,183,3,0.95)',
@@ -74,7 +75,7 @@ const PALETTES: Record<RenderTheme, Palette> = {
     label: 'rgba(74,44,71,0.85)',
     miss: '#ecd3df', ok: '#2bc985', bad: '#ff5c8a', warn: '#ffb703', perfect: '#ff6fa8',
     judgeHalo: 'rgba(255,255,255,0.92)', milestone: 'rgba(214,61,124,0.9)', dust: '',
-    additive: false, autoAlpha: 0.4,
+    ink: '#2b1a4d', additive: false, autoAlpha: 0.4,
   },
   dark: {
     hands: { R: ['#9fe1ff', '#b79bff'], L: ['#ffc79e', '#ff8ec7'] },
@@ -89,7 +90,7 @@ const PALETTES: Record<RenderTheme, Palette> = {
     label: 'rgba(40,20,45,0.85)',
     miss: '#4b3d70', ok: '#6ee7b7', bad: '#ff8aa5', warn: '#ffd166', perfect: '#ff8ec7',
     judgeHalo: 'rgba(20,10,35,0.75)', milestone: 'rgba(255,198,228,0.9)', dust: 'rgba(255,200,235,0.16)',
-    additive: true, autoAlpha: 0.45,
+    ink: '#0b0519', additive: true, autoAlpha: 0.45,
   },
 }
 let pal = PALETTES.light
@@ -460,10 +461,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
     ctx.fill(p)
   }
   ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'
+  ctx.strokeStyle = pal.ink; ctx.lineWidth = 1.5
   for (const b of buckets.values()) {
     ctx.globalAlpha = b.alpha
     ctx.fillStyle = b.solid ?? noteFill(ctx, hitY, b.c1, b.c2)
     ctx.fill(b.path)
+    ctx.stroke(b.path)
   }
   ctx.globalAlpha = 1
   ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.fill(heads)

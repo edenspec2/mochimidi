@@ -22,8 +22,6 @@ const tilt = (e: React.PointerEvent<HTMLElement>) => {
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height
   el.style.setProperty('--ry', `${(x - 0.5) * 7}deg`)
   el.style.setProperty('--rx', `${(0.5 - y) * 7}deg`)
-  el.style.setProperty('--mx', `${x * 100}%`)
-  el.style.setProperty('--my', `${y * 100}%`)
 }
 const untilt = (e: React.PointerEvent<HTMLElement>) => { e.currentTarget.style.setProperty('--rx', '0deg'); e.currentTarget.style.setProperty('--ry', '0deg') }
 

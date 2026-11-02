@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/fredoka'
 import '@fontsource-variable/nunito'
+import '@fontsource/mochiy-pop-one/latin-400.css'
 import './index.css'
 import App from './App'
 
