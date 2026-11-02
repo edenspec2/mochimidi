@@ -76,7 +76,11 @@ export function PianoCanvas({ scene, tick, fx }: { scene: () => Scene; tick?: ()
       onPointerDown={(e) => {
         const p = pointerPitch(e)
         if (p === null) return
-        if (typeof p === 'object') { midi.emit({ type: 'pad', pad: p.pad, vel: 100, channel: 10, time: performance.now(), source: 'mouse' }); return }
+        if (typeof p === 'object') {
+          midi.emit({ type: 'pad', pad: p.pad, vel: 100, channel: 10, time: performance.now(), source: 'mouse' })
+          window.addEventListener('pointerup', () => midi.padUp(p.pad), { once: true })
+          return
+        }
         e.currentTarget.setPointerCapture(e.pointerId) // the release reaches us even if the finger slides off
         down.current.set(e.pointerId, p)
         midi.emit({ type: 'on', pitch: p, vel: 85, channel: 1, time: performance.now(), source: 'mouse' })

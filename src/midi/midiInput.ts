@@ -29,11 +29,11 @@ export interface MidiFilter {
 export type PadTouch = 'light' | 'normal' | 'full'
 
 /**
- * Pad velocity after the touch setting. MiniLab pads send low velocities unless struck hard; 'light' lifts soft taps
- * (20 → 50, 40 → 71) and keeps full hits full; 'full' plays every hit at full strength.
+ * Pad velocity after the touch setting. MiniLab pads send low velocities unless struck hard; 'light' makes any tap
+ * that registers play strong (5 → 78, 20 → 96), 'normal' keeps the full soft-to-hard range, 'full' plays every hit at full strength.
  */
 export const padVel = (vel: number, touch: PadTouch = 'normal') =>
-  touch === 'full' ? 127 : touch === 'light' ? Math.max(1, Math.round(127 * Math.sqrt(vel / 127))) : vel
+  touch === 'full' ? 127 : touch === 'light' ? Math.round(127 * (vel / 127) ** 0.15) : vel
 
 /** Pad number 0–7 for a pad note; the second bank (base + 8 …) maps onto the same 8 drums. */
 export const padIndex = (pitch: number, base: number) => (((pitch - base) % 8) + 8) % 8
@@ -94,11 +94,15 @@ export class MidiInput {
 
   private access: MIDIAccess | null = null
   private listeners = new Set<(e: InputEvent) => void>()
+  private padUpListeners = new Set<(pad: number) => void>()
   private ccListeners = new Set<(e: CCEvent) => void>()
   private changeListeners = new Set<() => void>()
 
   on(fn: (e: InputEvent) => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   onCC(fn: (e: CCEvent) => void) { this.ccListeners.add(fn); return () => { this.ccListeners.delete(fn) } }
+  /** A pad was let go. Kept out of `on`: a drum hit has no length, so the scorer and recorder never hear of this. */
+  onPadUp(fn: (pad: number) => void) { this.padUpListeners.add(fn); return () => { this.padUpListeners.delete(fn) } }
+  padUp(pad: number) { this.padUpListeners.forEach((f) => f(pad)) }
   onChange(fn: () => void) { this.changeListeners.add(fn); return () => { this.changeListeners.delete(fn) } }
   private changed() { this.changeListeners.forEach((f) => f()) }
 
@@ -155,6 +159,7 @@ export class MidiInput {
     // Knobs follow the port choice but not the channel filter (they may sit on another channel than the keys).
     if (raw?.type === 'cc') { if (this.filter.port === 'all' || this.activePort === input.id) this.ccListeners.forEach((f) => f(raw)); this.changed(); return }
     if (raw?.type === 'on' && raw.channel === 10 && this.onPadLearn) { this.onPadLearn(raw.pitch); this.onPadLearn = null }
+    if (raw?.type === 'off' && raw.channel === 10 && this.filter.pads === 'drums') this.padUp(padIndex(raw.pitch, this.filter.padBase))
     const e = routePads(raw, this.filter)
     if (e && passesFilter(e, { ...this.filter, port: this.activePort }, input.id)) this.emit(e)
     else this.changed()
@@ -175,6 +180,7 @@ export class MidiInput {
     const t = performance.now()
     for (const p of [...this.held.keys()]) this.emit({ type: 'off', pitch: p, channel: 1, time: t, source: 'system' })
     if (this.sustain) this.emit({ type: 'sustain', down: false, channel: 1, time: t, source: 'system' })
+    for (let k = 0; k < 8; k++) this.padUp(k)
   }
 
   get connectedCount() { return this.inputs.filter((i) => i.state === 'connected').length }

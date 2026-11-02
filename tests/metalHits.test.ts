@@ -28,13 +28,15 @@ vi.mock('tone', () => {
   }
 })
 
-it('keeps a soft pad hit clearly under a hard one, but audible', async () => {
+it('plays a light tap strong on Light, and keeps soft under hard when As played', async () => {
   const { padGain } = await import('../src/audio/audioEngine')
   const { padVel } = await import('../src/midi/midiInput')
-  const db = (rawVel: number) => 20 * Math.log10(padGain(padVel(rawVel, 'light')))
-  expect(db(127)).toBeCloseTo(0, 5)
-  expect(db(20)).toBeLessThan(-8) // about twice as quiet to the ear
-  expect(db(1)).toBeGreaterThan(-18)
+  const db = (rawVel: number, touch: 'light' | 'normal') => 20 * Math.log10(padGain(padVel(rawVel, touch)))
+  expect(db(127, 'light')).toBeCloseTo(0, 5)
+  expect(db(20, 'light')).toBeGreaterThan(-4)
+  expect(db(1, 'light')).toBeGreaterThan(-8)
+  expect(db(20, 'normal')).toBeLessThan(-12)
+  expect(db(1, 'normal')).toBeGreaterThan(-20) // the floor
 })
 
 it('renders each metal hit once, away from the live context, and keeps it when the kit is dropped', async () => {

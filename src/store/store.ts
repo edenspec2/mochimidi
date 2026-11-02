@@ -60,7 +60,7 @@ export interface Settings {
   computerKeys: boolean // play with the computer keyboard (A S D F …)
   theme: 'light' | 'dark' | 'system'
   audioBuffer: 'interactive' | 'balanced' // OS audio buffer: 'balanced' trades a few ms of latency for fewer crackles
-  padKit: Kit // what the pads play: the drum kit, the kirtan kit (dholak, kartals …) or the dubstep kit
+  padKit: Kit // what the pads play: the drum kit, the kirtan kit (dholak, kartals …), the dubstep kit or the epic kit
   kirtan: KirtanSettings // drone and rhythm loop under free play
 }
 

@@ -55,10 +55,10 @@ export function MidiDiagnostics() {
             <option value="notes">Piano notes</option>
           </select>
         </label>
-        <label className="field" title="Light makes soft taps louder; Full plays every hit at full strength">Pad touch
+        <label className="field" title="Light: any tap plays strong. As played: soft is quiet, hard is loud. Full: every hit at full strength">Pad touch
           <select value={st.padTouch} onChange={(e) => settings.set({ padTouch: e.target.value as typeof st.padTouch })}>
-            <option value="light">Light (soft taps louder)</option>
-            <option value="normal">As played</option>
+            <option value="light">Light (any tap plays strong)</option>
+            <option value="normal">As played (soft quiet, hard loud)</option>
             <option value="full">Full (every hit loud)</option>
           </select>
         </label>

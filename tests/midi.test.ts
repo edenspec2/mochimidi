@@ -53,8 +53,11 @@ describe('MidiInput', () => {
     f.add('b', 'Minilab3 MIDI')
     expect(m.activePort).toBe('b')
     f.send('a', [0x90, 94, 127]) // MCU transport button
+    const ups: number[] = []
+    m.onPadUp((k) => ups.push(k))
     f.send('b', [0x99, 36, 100]) // pad 1 on channel 10 → kick drum, not a piano note
-    f.send('b', [0x89, 36, 0]) // pad release: drums have no length
+    f.send('b', [0x89, 36, 0]) // pad release: drums have no length, only the pad arp hears it
+    expect(ups).toEqual([0])
     f.send('b', [0x90, 60, 80])
     expect(events.map((e) => (e.type === 'on' ? e.pitch : e.type === 'pad' ? `pad${e.pad}` : e.type))).toEqual(['pad0', 60])
     expect(m.held.has(36)).toBe(false)
@@ -106,7 +109,7 @@ describe('pads', () => {
   })
   it('respects a detected pad-1 note, "ignore" and "piano notes"', () => {
     expect(routePads(pad(48), f({ padBase: 48 }))).toMatchObject({ pad: 0 })
-    expect(routePads(parseMessage([0x99, 36, 20], 0, 'p'), f({ padTouch: 'light' }))).toMatchObject({ vel: 50 }) // soft taps lifted
+    expect(routePads(parseMessage([0x99, 36, 20], 0, 'p'), f({ padTouch: 'light' }))).toMatchObject({ vel: 96 }) // soft taps lifted
     expect(routePads(parseMessage([0x99, 36, 127], 0, 'p'), f({ padTouch: 'light' }))).toMatchObject({ vel: 127 })
     expect(routePads(parseMessage([0x99, 36, 20], 0, 'p'), f({ padTouch: 'full' }))).toMatchObject({ vel: 127 })
     expect(routePads(pad(36), f({ pads: 'ignore' }))).toBeNull()

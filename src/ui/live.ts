@@ -44,13 +44,14 @@ export function initLiveInput() {
       perform.noteOff(e.pitch)
       for (let i = trails.length - 1; i >= 0; i--) if (trails[i].pitch === e.pitch && trails[i].off === null) { trails[i].off = performance.now(); break }
     } else if (e.type === 'pad') {
-      if (!padHit(e.pad)) audio.drum(e.pad, undefined, e.vel) // while sampling, a pad hit can end the take or take it
+      if (!padHit(e.pad)) perform.padDown(e.pad, e.vel) // while sampling, a pad hit can end the take or take it
       padHits[e.pad] = performance.now() + 140
     }
     else if (e.type === 'bend') audio.setBend(e.value)
     else if (e.type === 'mod') audio.setMod(e.value)
     else audio.setSustain(e.down)
   })
+  midi.onPadUp((pad) => perform.padUp(pad))
   const press = ccPresses()
   midi.onCC((e) => { const b = press(e); if (!(b && sampleControl(b))) handleCC(e.cc, e.raw) })
   void initPadSamples()
@@ -62,7 +63,7 @@ export function initLiveInput() {
     midi.filter = { port: s.midiPort, channel: s.midiChannel, pads: s.padMode, padBase: s.padBase, padTouch: s.padTouch }
     // Only on a real change: other settings writes (metronome, labels, zoom) must not undo a lesson's own instrument.
     if (s.instrument !== lastInstrument) { lastInstrument = s.instrument; audio.instrument = s.instrument }
-    if (s.padKit !== lastPadKit) { lastPadKit = s.padKit; kit.id = s.padKit } // only on a change: a kirtan lesson sets its own kit
+    if (s.padKit !== lastPadKit) { lastPadKit = s.padKit; kit.id = s.padKit; audio.preloadKit(s.padKit) } // only on a change: a kirtan lesson sets its own kit
     kirtan.configure(s.kirtan)
     audio.latencyHint = s.audioBuffer // read when audio starts, so a change applies after a reload
     if (audio.started) audio.setVolume(s.volume)
@@ -94,6 +95,8 @@ export function initLiveInput() {
     midi.emit({ type: 'on', pitch: computerKeys.base + i, vel: 90, channel: 1, time: performance.now(), source: 'computer' })
   })
   window.addEventListener('keyup', (e) => {
+    const pad = /^Digit([1-8])$/.exec(e.code)
+    if (pad) midi.padUp(+pad[1] - 1)
     const p = downKeys.get(e.code)
     downKeys.delete(e.code)
     if (p !== undefined) midi.emit({ type: 'off', pitch: p, channel: 1, time: performance.now(), source: 'computer' })

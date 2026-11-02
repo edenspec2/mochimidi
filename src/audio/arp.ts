@@ -9,6 +9,7 @@ export const ARP_RATES = [{ label: '1/4', beats: 1 }, { label: '1/8', beats: 0.5
 export interface ArpSettings {
   on: boolean; mode: ArpMode; rate: number; octaves: number; gate: number; latch: boolean
   swing?: number // 0..1: every second step is late by up to a third of a step (a triplet shuffle); missing in older saves
+  pads?: boolean // held pads repeat at the arp's speed, whether or not the keys arpeggiate; missing in older saves
 }
 export const ARP_MAX_OCTAVES = 4
 export interface ChordSettings { on: boolean; shape: number[] }

@@ -133,6 +133,7 @@ function PerformSection() {
       <div className="sp-row">
         <button className={`btn small${arp.on ? ' on' : ''}`} aria-pressed={arp.on} onClick={() => setArp({ on: !arp.on })}>Arp</button>
         <button className={`btn small${arp.latch ? ' on' : ''}`} aria-pressed={arp.latch} onClick={() => setArp({ latch: !arp.latch })} title="Keep playing after you let go">Hold</button>
+        <button className={`btn small${arp.pads ? ' on' : ''}`} aria-pressed={!!arp.pads} onClick={() => setArp({ pads: !arp.pads })} title="Held pads repeat at this speed, cycling through every pad you hold">Pads</button>
       </div>
       <div className="sp-row">
         <Knob label="Tempo" value={bpm} min={40} max={240} norm={(bpm - 40) / 200} text={`${bpm} BPM`} steps={200}

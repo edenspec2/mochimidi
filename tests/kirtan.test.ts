@@ -23,6 +23,9 @@ describe('kirtan accompaniment', () => {
     kit.id = 'dub'
     expect(currentDrums()).toHaveLength(8)
     expect(noteName(202)).toBe('Wobble')
+    kit.id = 'epic'
+    expect(currentDrums()).toHaveLength(8)
+    expect(noteName(202)).toBe('Braam')
     kit.id = 'standard'
   })
 })

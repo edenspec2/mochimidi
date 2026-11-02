@@ -18,7 +18,7 @@ export function PadSampleStatus() {
   return s.phase === 'idle' ? null : <div className="sample-status" role="status">{STATUS[s.phase]}</div>
 }
 
-const KIT_LABELS: Record<Kit, string> = { standard: 'Pads: drum kit', kirtan: 'Pads: dholak & kartals', dub: 'Pads: dubstep' }
+const KIT_LABELS: Record<Kit, string> = { standard: 'Pads: drum kit', kirtan: 'Pads: dholak & kartals', dub: 'Pads: dubstep', epic: 'Pads: epic' }
 /** What the pads play. */
 export function PadKitPicker() {
   const { padKit } = useStore(settings)

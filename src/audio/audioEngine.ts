@@ -1,10 +1,10 @@
 import * as Tone from 'tone'
-import { DUB_DRUMS, kit as drumKit, type Kit } from '../music/drums'
+import { kit as drumKit, type Kit } from '../music/drums'
 import { toneName } from '../music/theory'
 import { defaults, effective, type Effective, type Params } from './sound'
 import { track } from '../analytics'
 import { NativeSynth, type Patch } from './nativeSynth'
-import { renderDub } from './dubKit'
+import { RENDERED_KITS, renderKit, type RenderedKit } from './renderedKits'
 
 export type InstrumentId = 'piano' | 'epiano' | 'strings' | 'synth' | 'harmonium' | 'bansuri'
 export const INSTRUMENTS: { id: InstrumentId; label: string }[] = [
@@ -24,16 +24,16 @@ const RAMP = 0.04 // s: long enough to avoid zipper noise from 7-bit knob steps,
  */
 const PUSH_FROM = 0.8
 const PUSH_DB = 8
-/** Level of the drum kits and pad sounds. On the PC they sat 12 dB and more over the keys and drove the bus compressor, which ducked every other track. */
-const DRUM_BUS = { light: 0.8, full: 0.5 }
+/** Level of the drum kits and pad sounds. Pushed much higher on the PC, they drive the bus compressor, which ducks every other track. */
+const DRUM_BUS = { light: 1, full: 0.8 }
 const XFADE = 0.03 // s: switching an effect in or out
 const REVERB_XFADE = 0.15 // s: from the old reverb to a newly rendered one
 
 /** A drum kit: what each pad plays, and every node it built (disposed together when the kit is dropped). */
 interface DrumSet { hits: ((time: number, vel: number) => void)[]; nodes: Tone.ToneAudioNode[] }
 /**
- * Drum velocity to level. Pad touch already lifts soft hits so they register; a shallower curve on top left a tap and a
- * full hit ~4 dB apart, which sounds like no difference. Here velocity 50 → -9 dB, 100 → -3 dB, and a floor keeps taps audible.
+ * Drum velocity to level, wide enough to hear the difference (a shallower curve left a tap and a full hit ~4 dB apart):
+ * velocity 50 → -9 dB, 100 → -3 dB, with a floor so the softest hit stays audible. Pad touch 'light' lifts velocity first.
  */
 export const padGain = (vel: number) => 0.1 + 0.9 * (Math.max(1, vel) / 127) ** 1.4
 
@@ -443,8 +443,8 @@ class AudioEngine {
     const hat = (dur: number, decay: number, volume = -22) => this.metal({ freq: 300, dur, decay, release: 0.01, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume }, bus, nodes)
     // Measured: the closed hat's 50 ms tick sat ~15 dB under the open hat, and the clap (pink noise through a narrow
     // band) ~22 dB under the snare; both raised to sit with the rest of the kit.
-    const closed = hat(0.05, 0.05, -14), open = hat(0.3, 0.35), crash = hat(1.2, 1.4)
-    const clap = k(new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.002, decay: 0.16, sustain: 0 }, volume: 12 })).connect(k(new Tone.Filter(1200, 'bandpass')).connect(bus))
+    const closed = hat(0.05, 0.05, -14), open = hat(0.3, 0.35, -16), crash = hat(1.2, 1.4, -16)
+    const clap = k(new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.002, decay: 0.16, sustain: 0 }, volume: 15 })).connect(k(new Tone.Filter(1200, 'bandpass')).connect(bus))
     const tom = k(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 3, envelope: { attack: 0.001, decay: 0.35, sustain: 0 }, volume: -4 })).connect(bus)
     const tomHi = k(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 3, envelope: { attack: 0.001, decay: 0.3, sustain: 0 }, volume: -4 })).connect(bus)
     return { nodes, hits: [
@@ -484,18 +484,22 @@ class AudioEngine {
     ] }
   }
 
-  /** Dubstep kit: recordings (see dubKit.ts), so it needs no synths. A bass cuts off the last bass, and a pad its own last hit, instead of piling up. */
-  private makeDubKit(): DrumSet {
+  /** A kit of recordings (see renderedKits.ts): no synths, so it costs almost nothing. */
+  private makeRenderedKit(id: RenderedKit): DrumSet {
     const bus = new Tone.Gain(DRUM_BUS[this.light ? 'light' : 'full']).connect(this.chain!.drumsVol)
-    this.dubHits ??= DUB_DRUMS.map((_, k) => renderDub(k, this.ctx.sampleRate).then((b) => this.playable(b)))
-    const ringing: ((at: number) => void)[] = []
-    return { nodes: [bus], hits: this.dubHits.map((job, k) => (t: number, v: number) => void job.then((buf) => {
-      const slot = k === 3 ? 2 : k // wobble and growl
-      ringing[slot]?.(Math.max(t, this.now()))
-      ringing[slot] = this.playBuffer(buf, v, t, bus)
+    const sounds = RENDERED_KITS[id], jobs = (this.renderedHits[id] ??= renderKit(id, this.ctx.sampleRate).map((job) => job.then((b) => this.playable(b))))
+    const ringing: Record<number, (at: number) => void> = {}
+    return { nodes: [bus], hits: jobs.map((job, k) => (t: number, v: number) => void job.then((buf) => {
+      if (this.now() - t > 0.25) return // hit while still rendering: a boom seconds late is worse than none
+      const { cut } = sounds[k]
+      if (cut) ringing[cut]?.(Math.max(t, this.now()))
+      const stop = this.playBuffer(buf, v, t, bus)
+      if (cut) ringing[cut] = stop
     })) }
   }
-  private dubHits: Promise<AudioBuffer>[] | null = null // outlives the kit, like the metal hits
+  private renderedHits: Partial<Record<RenderedKit, Promise<AudioBuffer>[]>> = {} // outlive the kit, like the metal hits
+  /** The epic kit takes seconds to render, so that starts when a kit is chosen, not on its first hit. */
+  preloadKit(id: Kit) { if (id === 'dub' || id === 'epic') void renderKit(id, Tone.getContext().sampleRate) }
 
   /** A sound the player recorded or loaded for pad `k` (see padSamples.ts); null gives the pad its drum back. */
   setPadSample(k: number, s: { rate: number; data: Float32Array<ArrayBuffer> } | null) { this.padSamples[k] = s; this.padBuffers[k] = null }
@@ -514,7 +518,7 @@ class AudioEngine {
       return
     }
     kitId ??= drumKit.id
-    const hit = (this.kits[kitId] ??= kitId === 'kirtan' ? this.makeKirtanKit() : kitId === 'dub' ? this.makeDubKit() : this.makeKit()).hits[k]
+    const hit = (this.kits[kitId] ??= kitId === 'kirtan' ? this.makeKirtanKit() : kitId === 'standard' ? this.makeKit() : this.makeRenderedKit(kitId)).hits[k]
     if (!hit) return
     // A built kit costs audio time even when silent (~6 % of a PC's audio thread): after a quiet spell, drop both
     // kits; the next hit rebuilds one.
@@ -523,7 +527,7 @@ class AudioEngine {
       for (const set of Object.values(this.kits)) set.nodes.forEach((n) => n.dispose())
       this.kits = {}
     }, KIT_IDLE * 1000)
-    const slot = (kitId === 'kirtan' ? 8 : kitId === 'dub' ? 16 : 0) + k
+    const slot = (kitId === 'standard' ? 0 : 8) + k // rendered kits have no one-voice limit
     const t = Math.max(time, this.now(), (this.lastHit[slot] ?? 0) + 0.01)
     this.lastHit[slot] = t
     hit(t, padGain(vel))
