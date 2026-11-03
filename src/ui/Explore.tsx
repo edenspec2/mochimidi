@@ -8,6 +8,7 @@ import { settings, useStore } from '../store/store'
 import { useHeld } from './hooks'
 import { padHits, trails } from './live'
 import { PianoCanvas } from './PianoCanvas'
+import { Soundwave } from './Soundwave'
 import { deviceRange } from './Practice'
 import { SoundPanel } from './SoundPanel'
 import { TheoryPanel } from './TheoryPanel'
@@ -108,9 +109,11 @@ export function Explore({ onPractice }: { onPractice: (l: Lesson) => void }) {
         <span className="sub">Play freely – the panel explains every note and chord.</span>
         <span className="spacer" />
         {heldKey && held.length >= 3 && <span className="pill">These notes fit {heldKey}</span>}
+        <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={st.soundwave} onChange={(e) => settings.set({ soundwave: e.target.checked })} /> Soundwave</label>
       </div>
       <div className="practice-body">
-        <div className="explore-split">
+        <div className={`explore-split${st.soundwave ? ' wave' : ''}`}>
+          {st.soundwave && <Soundwave />}
           <div className="canvas-wrap"><PianoCanvas scene={scene} /></div>
           <div className="row" style={{ padding: 16, gap: 16, alignItems: 'stretch', borderTop: '1px solid var(--line)', overflow: 'auto' }}>
             <div className="card col" style={{ flex: 1, minWidth: 260 }}>

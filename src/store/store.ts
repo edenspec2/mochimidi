@@ -62,6 +62,7 @@ export interface Settings {
   theme: 'light' | 'dark' | 'system'
   audioBuffer: 'interactive' | 'balanced' // OS audio buffer: 'balanced' trades a few ms of latency for fewer crackles
   strips: { pitch: StripFx; mod: StripFx } // what the touch strips play in free play and Create
+  soundwave: boolean // Explore draws the music as a wave
   padKit: Kit // what the pads play: the drum kit, the kirtan kit (dholak, kartals …), the dubstep, epic or house kit
   kirtan: KirtanSettings // drone and rhythm loop under free play
 }
@@ -85,6 +86,7 @@ export const settings = persisted<Settings>('settings', {
   theme: 'light',
   audioBuffer: 'interactive',
   strips: { pitch: 'filter', mod: 'vibrato' },
+  soundwave: false,
   padKit: 'standard',
   kirtan: { drone: 'off', sa: 0, rhythm: 'off', level: 0.7 },
 })

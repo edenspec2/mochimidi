@@ -7,8 +7,8 @@ export type StripFx = 'bend' | 'vibrato' | MixEffect
 const OPEN = 20000 // Hz: a low-pass this high changes nothing
 const SMOOTH = 0.015 // s: a strip jumps; the sound must not click
 
-/** −1..1: down closes a low-pass to 200 Hz, up raises a high-pass to 2.5 kHz, the middle leaves the sound alone. */
-export const filterAt = (x: number) => ({ low: OPEN * 0.01 ** Math.max(0, -x), high: 20 * 125 ** Math.max(0, x), Q: Math.abs(x) * 10 })
+/** −1..1: down closes a low-pass to 120 Hz, up raises a high-pass to 4 kHz, the middle leaves the sound alone. */
+export const filterAt = (x: number) => ({ low: OPEN * 0.006 ** Math.max(0, -x), high: 20 * 200 ** Math.max(0, x), Q: Math.abs(x) * 14 })
 /** Further up the strip the wobble speeds up: quarters, eighths, triplets, sixteenths. */
 export const wobbleHz = (x: number, bpm: number) => (bpm / 60) * Math.min(4, 1 + Math.floor(x * 4))
 /** Eighth-note chops, sixteenths past half-way. */
@@ -62,12 +62,12 @@ export class MixFx {
       this.glide(this.input.frequency, f.low); this.glide(this.high.frequency, f.high)
       this.glide(x < 0 ? this.input.Q : this.high.Q, f.Q); this.glide(x < 0 ? this.high.Q : this.input.Q, 0)
     } else if (fx === 'echo') {
-      this.glide(this.send.gain, x)
-      this.glide(this.feedback.gain, x && 0.35 + 0.3 * x)
+      this.glide(this.send.gain, Math.min(1, x * 1.5))
+      this.glide(this.feedback.gain, x && 0.4 + 0.35 * x) // up to 0.75: long tails that still die away
       if (x) this.delay.delayTime.setTargetAtTime(Math.min(2, (60 / bpm) * 0.75), this.ctx.currentTime, SMOOTH) // a dotted eighth
     } else if (fx === 'wobble') {
-      this.glide(this.wobble.frequency, x ? 500 : OPEN); this.glide(this.wobble.Q, x ? 8 : 0)
-      this.glide(this.wobbleDepth.gain, x ? 2400 : 0) // cents: two octaves each way
+      this.glide(this.wobble.frequency, x ? 400 : OPEN); this.glide(this.wobble.Q, x ? 12 : 0)
+      this.glide(this.wobbleDepth.gain, x ? 3600 : 0) // cents: three octaves each way
       this.wobbleLfo.frequency.value = wobbleHz(x, bpm)
     } else this.stutter(x, bpm)
   }
@@ -81,7 +81,7 @@ export class MixFx {
       this.chop.start()
     } else if (!x && this.chop) { this.chop.stop(); this.chop = null }
     if (this.chop) this.chop.frequency.value = stutterHz(x, bpm)
-    const depth = Math.min(1, x * 2)
+    const depth = Math.min(1, x * 3) // fully chopped from a third of the way up
     this.glide(this.gate.gain, 1 - depth / 2); this.glide(this.chopDepth.gain, depth / 2)
   }
 

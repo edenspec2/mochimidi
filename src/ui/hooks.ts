@@ -11,7 +11,8 @@ export function useMidiStatus() {
 /** Currently held pitches, sorted. Re-renders on key events only (not per frame). */
 export function useHeld(): number[] {
   const [held, setHeld] = useState<number[]>(() => [...midi.held.keys()].sort((a, b) => a - b))
-  useEffect(() => midi.on(() => setHeld([...midi.held.keys()].sort((a, b) => a - b))), [])
+  // Not on every event: a touch strip sends a hundred a second, and each re-rendered the whole page.
+  useEffect(() => midi.on((e) => { if (e.type === 'on' || e.type === 'off') setHeld([...midi.held.keys()].sort((a, b) => a - b)) }), [])
   return held
 }
 

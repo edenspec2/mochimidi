@@ -552,6 +552,9 @@ class AudioEngine {
     else if (fx === 'vibrato') this.setMod(Math.abs(v))
     else if (this.chain && (v || this.mixFx)) (this.mixFx ??= this.makeMixFx()).set(fx, v, this.bpm)
   }
+  /** The soundwave listens to what goes to the speakers. */
+  tap(an: AudioNode) { this.out?.connect(an) }
+  untap(an: AudioNode) { try { this.out?.disconnect(an) } catch { /* never connected */ } }
   /** Going into a lesson: nothing stays on from a strip left up. */
   stripsOff() { this.setBend(0); this.setMod(0); this.mixFx?.clear(this.bpm) }
   private makeMixFx() {
@@ -569,7 +572,7 @@ class AudioEngine {
   setMod(m: number) { this.mod = m; this.applyVibrato() }
   /** The bansuri has a gentle vibrato of its own, like a breath; the mod strip adds to it. */
   private applyVibrato() {
-    const depth = (this.inst === 'bansuri' ? 0.05 : 0) + this.mod * 0.3
+    const depth = (this.inst === 'bansuri' ? 0.05 : 0) + this.mod * 0.5
     if (!this.vibrato && depth > 0 && this.chain) this.vibrato = this.makeVibrato() // phones: first use
     if (this.vibrato) this.vibrato.depth.value = depth
   }
