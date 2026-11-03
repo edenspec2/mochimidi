@@ -95,7 +95,7 @@ export function Practice({ lesson, onExit, onNext }: { lesson: Lesson; onExit: (
   const hasKeys = lesson.notes.some((n) => n.drum === undefined)
 
   // A lesson brings its own drums: the free-play kirtan rhythm loop pauses meanwhile (its drone keeps playing).
-  useEffect(() => { audio.performFx = false; kirtan.lessonOpen = true; return () => { audio.performFx = true; kirtan.lessonOpen = false } }, [])
+  useEffect(() => { audio.performFx = false; audio.stripsOff(); kirtan.lessonOpen = true; return () => { audio.performFx = true; kirtan.lessonOpen = false } }, [])
 
   // Keep the screen on while a lesson is open: a phone that dims and locks mid-lesson also suspends the sound.
   // The browser drops the lock whenever the page is hidden, so it is asked for again on return.

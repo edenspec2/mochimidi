@@ -83,7 +83,7 @@ export function MidiDiagnostics() {
           <li>Nothing arrives? Only one program can use the MiniLab on Windows. Close MIDI Control Center / Analog Lab / DAWs.</li>
           <li>Sustain pedal: plug it into the jack on the back; it sends CC 64 and works here.</li>
           <li>Pads play a drum kit (Kick, Snare, Closed hat, Open hat, Clap, Low tom, High tom, Crash). If the wrong drum sounds, use <b>Detect pad 1</b>. On the computer, keys <span className="kbd">1</span>–<span className="kbd">8</span> are the pads.</li>
-          <li>Touch strips: the pitch strip bends and the mod strip adds vibrato on the <b>Synth lead</b>, <b>Electric piano</b> and <b>Strings</b> sounds (a grand piano can't bend).</li>
+          <li>Touch strips: pick what each one plays in the <b>Sound</b> panel. Vibrato works on every instrument; the filter, echo, wobble and stutter work on the whole mix. In lessons they are pitch bend and vibrato.</li>
           <li>Use wired headphones or speakers – Bluetooth adds 150–250 ms of delay that no setting can remove.</li>
         </ul>
       </details>

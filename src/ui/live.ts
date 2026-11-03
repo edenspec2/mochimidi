@@ -3,6 +3,7 @@ import { kirtan } from '../audio/kirtan'
 import { kit } from '../music/drums'
 import { allSounds, handleCC } from '../audio/controls'
 import { perform } from '../audio/perform'
+import { moveStrip } from '../audio/strips'
 import { bindingOf, ccPresses } from '../midi/binding'
 import { midi } from '../midi/midiInput'
 import { initPadSamples, padHit, sampleControl } from '../audio/padSamples'
@@ -47,8 +48,8 @@ export function initLiveInput() {
       if (!padHit(e.pad)) perform.padDown(e.pad, e.vel) // while sampling, a pad hit can end the take or take it
       padHits[e.pad] = performance.now() + 140
     }
-    else if (e.type === 'bend') audio.setBend(e.value)
-    else if (e.type === 'mod') audio.setMod(e.value)
+    else if (e.type === 'bend') moveStrip('pitch', e.value)
+    else if (e.type === 'mod') moveStrip('mod', e.value)
     else audio.setSustain(e.down)
   })
   midi.onPadUp((pad) => perform.padUp(pad))

@@ -3,6 +3,7 @@ import { kit as drumKit, type Kit } from '../music/drums'
 import { toneName } from '../music/theory'
 import { defaults, effective, type Effective, type Params } from './sound'
 import { track } from '../analytics'
+import { MixFx, type StripFx } from './mixFx'
 import { NativeSynth, type Patch } from './nativeSynth'
 import { RENDERED_KITS, renderKit, type RenderedKit } from './renderedKits'
 
@@ -78,6 +79,7 @@ function bypass(node: Tone.ToneAudioNode): Bypass {
 /** The effects chain. Keys: input → drive → filter → EQ → chorus → phaser → tremolo → keys vol; drums join after it. */
 interface Chain {
   input: Tone.Gain; filter: Tone.Filter; keysVol: Tone.Volume; drumsVol: Tone.Volume
+  mixIn: Tone.Gain // the whole mix, where the touch strips' effects join on first use
   push: Tone.Gain // before the limiter: the top of the volume slider drives the mix into it
   fx: Fx | null // null in the light engine: phones get no effects at all
 }
@@ -234,7 +236,7 @@ class AudioEngine {
     // exists, connected or not.
     this.started = true
     this.chain = this.makeChain()
-    // Synth sounds go through a vibrato the mod strip controls (depth 0 = no effect). It costs ~1.3 % of a PC's audio
+    // Every instrument goes through a vibrato the touch strips control (depth 0 = no effect). It costs ~1.3 % of a PC's audio
     // thread from the moment it exists, so phones build it only when the bansuri or the mod strip first needs it.
     this.vibrato = this.light ? null : this.makeVibrato()
     this.voices.set('piano', this.makePiano())
@@ -250,6 +252,7 @@ class AudioEngine {
     const clip = new Tone.WaveShaper((x) => Math.sign(x) * (Math.abs(x) <= 0.8 ? Math.abs(x) : 0.8 + 0.2 * Math.tanh((Math.abs(x) - 0.8) / 0.2)), 2049).toDestination()
     const limiter = new Tone.Compressor({ threshold: -1, ratio: 20, knee: 0, attack: 0.003, release: 0.1 }).connect(clip)
     const push = new Tone.Gain(1).connect(limiter)
+    const mixIn = new Tone.Gain(1).connect(push)
     this.out = clip
     const input = new Tone.Gain()
     const filter = new Tone.Filter({ frequency: 20000, type: 'lowpass', rolloff: -12, Q: 0.7 })
@@ -261,12 +264,12 @@ class AudioEngine {
       // squeeze the range gently (the browser's compressor adds make-up gain itself) and add 8 dB, so held notes stay
       // audible. Measured offline against the earlier 3:1, 5 ms / 0.3 s setting: ringing notes duck 3.7 dB instead
       // of 9 when a new note hits (no pumping), and the 30 ms attack keeps the hammer's strike (+9.4 dB vs +6.6).
-      const phone = new Tone.Compressor({ threshold: -24, ratio: 2, knee: 12, attack: 0.03, release: 1 }).connect(new Tone.Gain(2.5).connect(push)) // release: 1 s is the maximum
+      const phone = new Tone.Compressor({ threshold: -24, ratio: 2, knee: 12, attack: 0.03, release: 1 }).connect(new Tone.Gain(2.5).connect(mixIn)) // release: 1 s is the maximum
       const keysVol = new Tone.Volume(0).connect(phone), drumsVol = new Tone.Volume(0).connect(phone)
       input.connect(filter); filter.connect(keysVol)
-      return { input, filter, keysVol, drumsVol, push, fx: null }
+      return { input, filter, keysVol, drumsVol, mixIn, push, fx: null }
     }
-    const comp = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.005, release: 0.2 }).connect(push)
+    const comp = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.005, release: 0.2 }).connect(mixIn)
     const widener = new Tone.StereoWidener(0.5).connect(comp)
     const reverbDry = new Tone.Gain(1).connect(widener)
     const reverbGains: [Tone.Gain, Tone.Gain] = [new Tone.Gain(0).connect(widener), new Tone.Gain(0).connect(widener)]
@@ -292,7 +295,7 @@ class AudioEngine {
     const b = { drive: bypass(drive), eq: bypass(eq), phaser: bypass(phaser) }
     input.connect(b.drive.input); b.drive.output.connect(filter); filter.connect(b.eq.input); b.eq.output.connect(chorus)
     chorus.connect(b.phaser.input); b.phaser.output.connect(tremolo)
-    return { input, filter, keysVol, drumsVol, push, fx: { tremoloGain, drive, eq, chorus, phaser, tremolo, bypass: b, delay, widener, reverbs, reverbGains, reverbDry } }
+    return { input, filter, keysVol, drumsVol, mixIn, push, fx: { tremoloGain, drive, eq, chorus, phaser, tremolo, bypass: b, delay, widener, reverbs, reverbGains, reverbDry } }
   }
 
   /** Effects at zero still cost CPU: drive, EQ and phaser leave the path (with a crossfade) while they're at zero. */
@@ -542,12 +545,27 @@ class AudioEngine {
   /** Where background parts (drone, rhythm loops) join: the drums' volume, then the shared delay and reverb. */
   accompanimentBus(): Tone.ToneAudioNode | null { return this.chain?.drumsVol ?? null }
 
+  private mixFx: MixFx | null = null
+  /** A touch strip: `v` is −1..1 for bend and the filter, and 0..1 for the rest. */
+  stripFx(fx: StripFx, v: number) {
+    if (fx === 'bend') this.setBend(v)
+    else if (fx === 'vibrato') this.setMod(Math.abs(v))
+    else if (this.chain && (v || this.mixFx)) (this.mixFx ??= this.makeMixFx()).set(fx, v, this.bpm)
+  }
+  /** Going into a lesson: nothing stays on from a strip left up. */
+  stripsOff() { this.setBend(0); this.setMod(0); this.mixFx?.clear(this.bpm) }
+  private makeMixFx() {
+    const { mixIn, push } = this.chain!, m = new MixFx(this.ctx)
+    mixIn.disconnect(); Tone.connect(mixIn, m.input); Tone.connect(m.output, push)
+    return m
+  }
+
   /** Pitch strip: −1..1 bends the synth sounds by up to ±2 semitones. The sampled piano doesn't bend, like a real one. */
   setBend(v: number) {
     this.bendCents = Math.round(v * 200)
     this.voices.forEach((voice) => { if (voice instanceof NativeSynth) voice.set({ detune: this.bendCents }) })
   }
-  /** Mod strip: 0..1 → vibrato depth on the synth sounds. */
+  /** Mod strip: 0..1 → vibrato depth on every instrument. */
   setMod(m: number) { this.mod = m; this.applyVibrato() }
   /** The bansuri has a gentle vibrato of its own, like a breath; the mod strip adds to it. */
   private applyVibrato() {
@@ -555,10 +573,10 @@ class AudioEngine {
     if (!this.vibrato && depth > 0 && this.chain) this.vibrato = this.makeVibrato() // phones: first use
     if (this.vibrato) this.vibrato.depth.value = depth
   }
-  /** Synth voices made before it existed (on phones it is built on first use) are moved onto it. */
+  /** Voices made before it existed (on phones it is built on first use) are moved onto it. */
   private makeVibrato() {
     const v = new Tone.Vibrato((this.applied as Effective).vibratoRate ?? 5.5, 0).connect(this.chain!.input)
-    for (const s of [...this.voices.values(), this.fallback]) if (s && !(s instanceof Tone.Sampler)) { s.disconnect(); s.connect(v) }
+    for (const s of [...this.voices.values(), this.fallback, ...this.pianoLayers.map((l) => l.s)]) if (s) { s.disconnect(); s.connect(v) }
     return v
   }
 
@@ -596,7 +614,7 @@ class AudioEngine {
       this.voices.set('piano', v)
       this.applyVoice('piano', v)
     }
-    const input = this.chain!.input
+    const input = this.vibrato ?? this.chain!.input
     if (!this.light) {
       const urls = Object.fromEntries(PIANO_SAMPLES.map((p) => [p.note, p.file]))
       this.pianoLayers = PIANO_LAYERS.map(({ dir, from }) => {

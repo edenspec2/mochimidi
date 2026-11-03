@@ -49,9 +49,10 @@ describe('light engine (phones)', () => {
     // never finished building (a 1.2 s release left the phone silent).
     for (const c of of('Compressor')) expect([c.rec.opts?.attack, c.rec.opts?.release].every((v) => v === undefined || (v >= 0 && v <= 1))).toBe(true)
     const [lim, lift] = of('Compressor')
-    // phone bus → +8 dB → the volume slider's push stage → limiter
+    // phone bus → +8 dB → the strips' mix junction → the volume slider's push stage → limiter
     const push = of('Gain').find((g) => g.rec.to.includes(lim.self))!
-    expect(of('Gain').some((g) => lift.rec.to.includes(g.self) && g.rec.to.includes(push.self))).toBe(true)
+    const mixIn = of('Gain').find((g) => g.rec.to.includes(push.self))!
+    expect(of('Gain').some((g) => lift.rec.to.includes(g.self) && g.rec.to.includes(mixIn.self))).toBe(true)
     const vols = of('Volume').filter((n) => n.rec.to.includes(lift.self))
     expect(vols.length).toBe(2) // keys and drums
     // Notes reach the keys volume through the filter only.

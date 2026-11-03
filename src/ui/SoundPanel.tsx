@@ -5,7 +5,9 @@ import {
   allPresets, captureChord, ccFor, clearCC, currentParams, deleteUserPreset, getParam, learn, loadPreset, renameUserPreset,
   FADERS, moves, saveUserPreset, setCCMode, setParam, WIZARD, type CCMode,
 } from '../audio/controls'
+import type { StripFx } from '../audio/mixFx'
 import { defaults, FILTER_TYPES, fromNorm, resolve, spec, toNorm, type Target } from '../audio/sound'
+import { chooseStripFx, STRIP_FX } from '../audio/strips'
 import { midi } from '../midi/midiInput'
 import { RHYTHMS, SA_NAMES, type Drone, type Rhythm } from '../audio/kirtan'
 import { identifyChord } from '../music/theory'
@@ -245,6 +247,7 @@ function KirtanSection() {
 export function SoundPanel({ compact }: { compact?: boolean }) {
   const inst = useInst()
   const [learnMode, setLearnMode] = useState(false)
+  const { strips } = useStore(settings)
   const filterType = useSyncExternalStore(sound.subscribe, () => getParam('filterType'))
   const k = (id: Target, big?: boolean) => <ParamKnob key={id} id={id} big={big} learnMode={learnMode} />
   const synth = inst !== 'piano'
@@ -263,6 +266,16 @@ export function SoundPanel({ compact }: { compact?: boolean }) {
       <div className="sp-macros sp-hw-row">{WIZARD.slice(4).map((id) => k(id))}</div>
       <div className="sp-hw-label">Faders</div>
       <div className="sp-macros sp-hw-row">{FADERS.map((id) => k(id))}</div>
+      <div className="sp-hw-label">Touch strips</div>
+      <div className="sp-macros sp-hw-row sp-strips">
+        {(['pitch', 'mod'] as const).map((strip) => (
+          <label key={strip}>{strip === 'pitch' ? 'Pitch strip' : 'Mod strip'}
+            <select value={strips[strip]} onChange={(e) => chooseStripFx(strip, e.target.value as StripFx)}>
+              {STRIP_FX.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
       <Section title="Filter">
         <div className="seg sp-seg" aria-label="Filter type">
           {FILTER_TYPES.map((t, i) => <button key={t} className={filterType === i ? 'active' : ''} onClick={() => setParam('filterType', i)}>{['Low-pass', 'High-pass', 'Band-pass'][i]}</button>)}

@@ -4,6 +4,7 @@ import type { KirtanSettings } from '../audio/kirtan'
 import type { Kit } from '../music/drums'
 import type { ArpSettings, ChordSettings } from '../audio/arp'
 import type { CCMode } from '../audio/controls'
+import type { StripFx } from '../audio/mixFx'
 import type { PadTouch } from '../midi/midiInput'
 import type { Params, Preset, Target } from '../audio/sound'
 import type { Attempt } from '../engine/feedback'
@@ -60,6 +61,7 @@ export interface Settings {
   computerKeys: boolean // play with the computer keyboard (A S D F …)
   theme: 'light' | 'dark' | 'system'
   audioBuffer: 'interactive' | 'balanced' // OS audio buffer: 'balanced' trades a few ms of latency for fewer crackles
+  strips: { pitch: StripFx; mod: StripFx } // what the touch strips play in free play and Create
   padKit: Kit // what the pads play: the drum kit, the kirtan kit (dholak, kartals …), the dubstep, epic or house kit
   kirtan: KirtanSettings // drone and rhythm loop under free play
 }
@@ -82,6 +84,7 @@ export const settings = persisted<Settings>('settings', {
   computerKeys: true,
   theme: 'light',
   audioBuffer: 'interactive',
+  strips: { pitch: 'filter', mod: 'vibrato' },
   padKit: 'standard',
   kirtan: { drone: 'off', sa: 0, rhythm: 'off', level: 0.7 },
 })
