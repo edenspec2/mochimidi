@@ -20,3 +20,14 @@ export function ccPresses() {
     return e.raw > 0 && was === 0 ? { channel: e.channel, cc: e.cc } : null
   }
 }
+
+/** A CC button held down for `ms` calls `fire` (a button sends a value above 0 on press, 0 on release). Returns true for its CCs. */
+export function holdCC(ccs: number[], ms: number, fire: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return (e: CCEvent) => {
+    if (!ccs.includes(e.cc)) return false
+    clearTimeout(timer)
+    if (e.raw > 0) timer = setTimeout(fire, ms)
+    return true
+  }
+}

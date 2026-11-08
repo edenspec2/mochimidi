@@ -54,13 +54,14 @@ const NOISE_TRIM = 10
 interface Bypass { input: Tone.Gain; output: Tone.Gain; set(on: boolean): void }
 /**
  * Switching by reconnecting the graph clicked: the path jumped in one step and a freshly connected filter starts
- * from silence. Here the stage crossfades with a dry path, and only stops processing once it has faded out.
+ * from silence. Here the stage crossfades with a dry path, and only stops processing once it has faded out: then both
+ * its ends are unplugged, since a stage still wired to the output keeps running on its own internal signals.
+ * `tail`: where the stage ends, when it is more than one node.
  */
-function bypass(node: Tone.ToneAudioNode): Bypass {
+function bypass(node: Tone.ToneAudioNode, tail: Tone.ToneAudioNode = node): Bypass {
   const input = new Tone.Gain(), output = new Tone.Gain()
   const dry = new Tone.Gain(1).connect(output), wet = new Tone.Gain(0).connect(output)
   input.connect(dry)
-  node.connect(wet)
   let on = false, timer = 0
   return {
     input, output,
@@ -68,10 +69,10 @@ function bypass(node: Tone.ToneAudioNode): Bypass {
       if (v === on) return
       on = v
       clearTimeout(timer)
-      if (v) input.connect(node)
+      if (v) { input.connect(node); tail.connect(wet) }
       wet.gain.rampTo(v ? 1 : 0, XFADE)
       dry.gain.rampTo(v ? 0 : 1, XFADE)
-      if (!v) timer = window.setTimeout(() => { if (!on) input.disconnect(node) }, XFADE * 1000 + 50)
+      if (!v) timer = window.setTimeout(() => { if (!on) { input.disconnect(node); tail.disconnect(wet) } }, XFADE * 1000 + 50)
     },
   }
 }
@@ -86,7 +87,7 @@ interface Chain {
 interface Fx {
   tremoloGain: Tone.Gain
   drive: Tone.Distortion; eq: Tone.EQ3; chorus: Tone.Chorus; phaser: Tone.Phaser; tremolo: Tone.Tremolo
-  bypass: { drive: Bypass; eq: Bypass; phaser: Bypass }
+  bypass: { drive: Bypass; eq: Bypass; phaser: Bypass; chorus: Bypass; tremolo: Bypass; width: Bypass }
   delay: Tone.FeedbackDelay; widener: Tone.StereoWidener
   // Two fully-wet reverbs: a new length renders into the idle one, then the sound crossfades to it.
   reverbs: [Tone.Reverb, Tone.Reverb]; reverbGains: [Tone.Gain, Tone.Gain]; reverbDry: Tone.Gain
@@ -149,6 +150,7 @@ class AudioEngine {
   private click: Tone.Synth | null = null
   private fallback: Voice | null = null
   private vibrato: Tone.Vibrato | null = null
+  private vibratoSwitch: Bypass | null = null
   private kits: Partial<Record<Kit, DrumSet>> = {}
   private kitTimer = 0
   private lastHit: number[] = []
@@ -236,8 +238,8 @@ class AudioEngine {
     // exists, connected or not.
     this.started = true
     this.chain = this.makeChain()
-    // Every instrument goes through a vibrato the touch strips control (depth 0 = no effect). It costs ~1.3 % of a PC's audio
-    // thread from the moment it exists, so phones build it only when the bansuri or the mod strip first needs it.
+    // Every instrument goes through a vibrato the touch strips control, switched out at depth 0 (its LFO alone
+    // cost ~4 % of the audio thread). Phones build it only when the bansuri or the mod strip first needs it.
     this.vibrato = this.light ? null : this.makeVibrato()
     this.voices.set('piano', this.makePiano())
     this.apply()
@@ -250,7 +252,7 @@ class AudioEngine {
     // Even hard-kneed, the browser's compressor lets fast peaks through (a loud chord reached 1.03-1.29, clipping
     // harshly), so a soft clipper ends the chain: straight up to 0.8, then rounded off below 1.0.
     const clip = new Tone.WaveShaper((x) => Math.sign(x) * (Math.abs(x) <= 0.8 ? Math.abs(x) : 0.8 + 0.2 * Math.tanh((Math.abs(x) - 0.8) / 0.2)), 2049).toDestination()
-    const limiter = new Tone.Compressor({ threshold: -1, ratio: 20, knee: 0, attack: 0.003, release: 0.1 }).connect(clip)
+    const limiter = new Tone.Compressor({ threshold: -3, ratio: 20, knee: 0, attack: 0.003, release: 0.1 }).connect(clip)
     const push = new Tone.Gain(1).connect(limiter)
     const mixIn = new Tone.Gain(1).connect(push)
     this.out = clip
@@ -264,15 +266,16 @@ class AudioEngine {
       // squeeze the range gently (the browser's compressor adds make-up gain itself) and add 8 dB, so held notes stay
       // audible. Measured offline against the earlier 3:1, 5 ms / 0.3 s setting: ringing notes duck 3.7 dB instead
       // of 9 when a new note hits (no pumping), and the 30 ms attack keeps the hammer's strike (+9.4 dB vs +6.6).
-      const phone = new Tone.Compressor({ threshold: -24, ratio: 2, knee: 12, attack: 0.03, release: 1 }).connect(new Tone.Gain(2.5).connect(mixIn)) // release: 1 s is the maximum
+      const phone = new Tone.Compressor({ threshold: -24, ratio: 2, knee: 12, attack: 0.03, release: 1 }).connect(new Tone.Gain(1.6).connect(mixIn)) // release: 1 s is the maximum
       const keysVol = new Tone.Volume(0).connect(phone), drumsVol = new Tone.Volume(0).connect(phone)
       input.connect(filter); filter.connect(keysVol)
       return { input, filter, keysVol, drumsVol, mixIn, push, fx: null }
     }
     const comp = new Tone.Compressor({ threshold: -12, ratio: 3, attack: 0.005, release: 0.2 }).connect(mixIn)
-    const widener = new Tone.StereoWidener(0.5).connect(comp)
-    const reverbDry = new Tone.Gain(1).connect(widener)
-    const reverbGains: [Tone.Gain, Tone.Gain] = [new Tone.Gain(0).connect(widener), new Tone.Gain(0).connect(widener)]
+    const widener = new Tone.StereoWidener(0.5), width = bypass(widener)
+    width.output.connect(comp)
+    const reverbDry = new Tone.Gain(1).connect(width.input)
+    const reverbGains: [Tone.Gain, Tone.Gain] = [new Tone.Gain(0).connect(width.input), new Tone.Gain(0).connect(width.input)]
     const reverbs: [Tone.Reverb, Tone.Reverb] = [
       new Tone.Reverb({ decay: 2.2, preDelay: 0.01, wet: 1 }).connect(reverbGains[0]),
       new Tone.Reverb({ decay: 2.2, preDelay: 0.01, wet: 1 }).connect(reverbGains[1]),
@@ -282,29 +285,33 @@ class AudioEngine {
     delay.connect(reverbs[0]) // only the playing reverb is fed: an idle convolver would cost CPU for nothing
     const keysVol = new Tone.Volume(0).connect(delay)
     const drumsVol = new Tone.Volume(0).connect(delay)
-    // Tone's tremolo centres its gain on 0.5 whatever the depth; ×2 makes depth 0 exactly unity.
-    // A further ×2 (+6 dB): the piano peaks near -13 dB, far under the drums, and every track shares this path.
-    const tremoloGain = new Tone.Gain(4).connect(keysVol)
-    const tremolo = new Tone.Tremolo({ frequency: 4, depth: 0, spread: 180 }).connect(tremoloGain).start()
+    // Tone's tremolo centres its gain on 0.5 whatever the depth; ×2 inside its switched path makes depth 0 exactly unity.
+    // A further ×2 (+6 dB) after it: the piano peaks near -13 dB, far under the drums, and every track shares this path.
+    const tremoloGain = new Tone.Gain(2).connect(keysVol)
+    const tremolo = new Tone.Tremolo({ frequency: 4, depth: 0, spread: 180 }).start(), tremoloUnity = new Tone.Gain(2)
+    tremolo.connect(tremoloUnity)
     const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 3, baseFrequency: 350, wet: 0 })
     const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.7, wet: 0 }).start()
     const eq = new Tone.EQ3(0, 0, 0)
     const drive = new Tone.Distortion({ distortion: 0.3, wet: 0 })
-    // Measured CPU: filter, chorus and tremolo are nearly free, so they stay in the path for good;
-    // drive, EQ and phaser cost 8–21 % each and switch in and out with a crossfade.
-    const b = { drive: bypass(drive), eq: bypass(eq), phaser: bypass(phaser) }
-    input.connect(b.drive.input); b.drive.output.connect(filter); filter.connect(b.eq.input); b.eq.output.connect(chorus)
-    chorus.connect(b.phaser.input); b.phaser.output.connect(tremolo)
+    // Measured CPU: the filter is nearly free, so it stays in the path for good; drive, EQ and phaser cost 8–21 % each,
+    // and chorus, tremolo and widener 3.5–6 % even at zero (their LFOs never rest), so these switch in and out with a crossfade.
+    const b = { drive: bypass(drive), eq: bypass(eq), phaser: bypass(phaser), chorus: bypass(chorus), tremolo: bypass(tremolo, tremoloUnity), width }
+    input.connect(b.drive.input); b.drive.output.connect(filter); filter.connect(b.eq.input); b.eq.output.connect(b.chorus.input)
+    b.chorus.output.connect(b.phaser.input); b.phaser.output.connect(b.tremolo.input); b.tremolo.output.connect(tremoloGain)
     return { input, filter, keysVol, drumsVol, mixIn, push, fx: { tremoloGain, drive, eq, chorus, phaser, tremolo, bypass: b, delay, widener, reverbs, reverbGains, reverbDry } }
   }
 
-  /** Effects at zero still cost CPU: drive, EQ and phaser leave the path (with a crossfade) while they're at zero. */
+  /** Effects at zero still cost CPU: each leaves the path (with a crossfade) while it does nothing. */
   private rewire(e: Effective) {
     const b = this.chain!.fx?.bypass
     if (!b) return
     b.drive.set(e.drive > 0)
     b.eq.set(e.eqLow !== 0 || e.eqMid !== 0 || e.eqHigh !== 0)
     b.phaser.set(e.phaser > 0)
+    b.chorus.set(e.chorus > 0)
+    b.tremolo.set(e.tremolo > 0)
+    b.width.set(e.width !== 0.5)
   }
 
   /** Reverb mix as an equal-power crossfade, like Tone's own wet/dry. */
@@ -574,12 +581,13 @@ class AudioEngine {
   private applyVibrato() {
     const depth = (this.inst === 'bansuri' ? 0.05 : 0) + this.mod * 0.5
     if (!this.vibrato && depth > 0 && this.chain) this.vibrato = this.makeVibrato() // phones: first use
-    if (this.vibrato) this.vibrato.depth.value = depth
+    if (this.vibrato) { this.vibrato.depth.value = depth; this.vibratoSwitch!.set(depth > 0) } // at 0 its LFO cost ~4 % for nothing
   }
   /** Voices made before it existed (on phones it is built on first use) are moved onto it. */
   private makeVibrato() {
-    const v = new Tone.Vibrato((this.applied as Effective).vibratoRate ?? 5.5, 0).connect(this.chain!.input)
-    for (const s of [...this.voices.values(), this.fallback, ...this.pianoLayers.map((l) => l.s)]) if (s) { s.disconnect(); s.connect(v) }
+    const v = new Tone.Vibrato((this.applied as Effective).vibratoRate ?? 5.5, 0), sw = this.vibratoSwitch = bypass(v)
+    sw.output.connect(this.chain!.input)
+    for (const s of [...this.voices.values(), this.fallback, ...this.pianoLayers.map((l) => l.s)]) if (s) { s.disconnect(); s.connect(sw.input) }
     return v
   }
 
@@ -617,7 +625,7 @@ class AudioEngine {
       this.voices.set('piano', v)
       this.applyVoice('piano', v)
     }
-    const input = this.vibrato ?? this.chain!.input
+    const input = this.vibratoSwitch?.input ?? this.chain!.input
     if (!this.light) {
       const urls = Object.fromEntries(PIANO_SAMPLES.map((p) => [p.note, p.file]))
       this.pianoLayers = PIANO_LAYERS.map(({ dir, from }) => {
@@ -650,7 +658,7 @@ class AudioEngine {
   }
 
   private makeSynth(id: InstrumentId): Voice {
-    const out = this.vibrato ?? this.chain!.input
+    const out = this.vibratoSwitch?.input ?? this.chain!.input
     const base = { kind: 'osc', count: 1, spread: 0, harmonicity: 3, modulationIndex: 0, portamento: 0 } as const
     // Volumes sit each sound within about 7 dB of the piano (measured over a note); a synth track used to vanish under it.
     const patch: Patch = id === 'epiano' ? { ...base, kind: 'fm', type: 'sine', modulationIndex: 6, envelope: { attack: 0.002, decay: 1.2, sustain: 0.25, release: 0.8 }, volume: -6 }

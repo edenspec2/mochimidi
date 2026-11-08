@@ -86,8 +86,11 @@ describe('light engine (phones)', () => {
     audio.setMod(0.5)
     expect(of('Vibrato').length).toBe(1)
     const vib = of('Vibrato')[0]
-    expect(epiano.output.connected?.at(-1)).toBe(vib.self) // re-plugged into the vibrato
-    expect(vib.rec.to.includes((audio as unknown as { chain: { input: unknown } }).chain.input)).toBe(true) // into the chain input
+    // re-plugged into the vibrato's switch, which is on, and from it into the chain input
+    const into = of('Gain').find((g) => g.self === epiano.output.connected?.at(-1))
+    expect(!!into && into.rec.to.includes(vib.self)).toBe(true)
+    const wet = of('Gain').find((g) => vib.rec.to.includes(g.self)), out = wet && of('Gain').find((g) => wet.rec.to.includes(g.self))
+    expect(!!out && out.rec.to.includes((audio as unknown as { chain: { input: unknown } }).chain.input)).toBe(true)
     audio.setMod(0); audio.setMod(0.2)
     expect(of('Vibrato').length).toBe(1) // built once
     audio.instrument = 'piano'

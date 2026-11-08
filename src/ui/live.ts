@@ -1,10 +1,10 @@
 import { audio } from '../audio/audioEngine'
 import { kirtan } from '../audio/kirtan'
 import { kit } from '../music/drums'
-import { allSounds, handleCC } from '../audio/controls'
+import { allSounds, handleCC, loadPreset } from '../audio/controls'
 import { perform } from '../audio/perform'
-import { moveStrip } from '../audio/strips'
-import { bindingOf, ccPresses } from '../midi/binding'
+import { moveStrip, resetStrips } from '../audio/strips'
+import { bindingOf, ccPresses, holdCC } from '../midi/binding'
 import { midi } from '../midi/midiInput'
 import { initPadSamples, padHit, sampleControl } from '../audio/padSamples'
 import type { Trail } from '../render/pianoRenderer'
@@ -54,7 +54,10 @@ export function initLiveInput() {
   })
   midi.onPadUp((pad) => perform.padUp(pad))
   const press = ccPresses()
-  midi.onCC((e) => { const b = press(e); if (!(b && sampleControl(b))) handleCC(e.cc, e.raw) })
+  // The MiniLab's main encoder click (CC 115; 118 in its DAW program, per Arturia's chart) held down: every knob, fader and
+  // touch strip back to the instrument's Init. Its clicks never reach the knobs, where they used to grab a free control.
+  const hold = holdCC([115, 118], 800, () => { loadPreset({ name: 'Init', instrument: settings.get().instrument, params: {} }); resetStrips() })
+  midi.onCC((e) => { const b = press(e); if (!(b && sampleControl(b)) && !hold(e)) handleCC(e.cc, e.raw) })
   void initPadSamples()
   window.addEventListener('unhandledrejection', (e) => { audio.lastError = String(e.reason?.message ?? e.reason) })
   initStats()

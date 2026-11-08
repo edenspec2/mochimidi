@@ -354,7 +354,8 @@ function bucket(key: string, c1: string, c2: string, alpha: number, solid?: stri
 
 const DUST = Float32Array.from({ length: 96 }, (_, i) => ((Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1)
 
-export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s: Scene, now: number, fx?: Effects) {
+/** Draws one frame. Returns whether anything on screen is still moving, so a still picture need not be redrawn. */
+export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s: Scene, now: number, fx?: Effects): boolean {
   const [lo, hi] = s.range
   const geo = sceneGeometry(W, H, s.pads, s.padShare)
   const { kbH, hitY } = geo
@@ -368,6 +369,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
   if (fx) fx.last = now
   const isUser = (n: NoteEvent) => s.userHands === 'both' || s.userHands === n.hand
   const autoAlpha = s.autoAlpha ?? pal.autoAlpha
+  let moving = !!s.live || !!s.pending?.length
 
   // Beat pulse (kiai): strong on the bar, gentle on each beat, decays within the beat.
   let pulse = 0
@@ -513,6 +515,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
       const end = t.off ?? now
       const yb = hitY - (now - end) * 0.12, yt = Math.max(0, hitY - (now - t.on) * 0.12)
       if (yb < 0) continue
+      moving = true
       ;(t.ok === false ? tx : k.black ? tb : tw).roundRect(k.x + 3, yt, k.w - 6, Math.max(2, yb - yt), Math.min(6, (k.w - 6) / 2))
     }
     ctx.globalAlpha = 0.85
@@ -527,6 +530,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
   for (const p of s.held.keys()) {
     const k = layout.get(p); if (!k) continue
     const f = s.flashes?.get(p)
+    if (f && f.until > now) moving = true
     const color = f && f.until > now && !f.ok ? pal.bad : f && f.until > now ? pal.ok : '#6366f1'
     ctx.fillStyle = glowFor(ctx, color, hitY)
     ctx.fillRect(k.x + 1, hitY - 110, k.w - 2, 110)
@@ -549,7 +553,8 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
   const ease = (p: number, down: boolean) => {
     if (!fx) return down ? 1 : 0
     const d = fx.depth[p] + ((down ? 1 : 0) - fx.depth[p]) * (1 - Math.exp(-dt / (down ? 0.025 : 0.06)))
-    fx.depth[p] = d < 0.001 ? 0 : d
+    fx.depth[p] = d < 0.001 ? 0 : d > 0.999 ? 1 : d
+    if (fx.depth[p] !== (down ? 1 : 0)) moving = true
     return fx.depth[p]
   }
   const dots = s.highlightPcs?.join(',') ?? ''
@@ -608,6 +613,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
       const x = laneX(dIdx), w = geo.padW
       const f = s.flashes?.get(PAD_PITCH + dIdx)
       const lit = (s.padHits?.[dIdx] ?? 0) > now || (!!f && f.until > now)
+      if (lit) moving = true
       const d = ease(PAD_PITCH + dIdx, lit)
       const inset = 3 + d * 2
       const px = x + inset, py = geo.padTop + d * 2, pw = w - inset * 2, ph = geo.padSize - d * 3
@@ -635,11 +641,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number, s
   ctx.fillStyle = 'rgba(0,0,0,0.16)'
   ctx.fillRect(0, hitY, W, 3)
 
-  if (fx) drawEffects(ctx, W, hitY, now, fx, calm, (p) => {
+  if (fx && drawEffects(ctx, W, hitY, now, fx, calm, (p) => {
     if (p >= PAD_PITCH) return s.pads ? geo.padX0 + (p - PAD_PITCH + 0.5) * geo.padW : -1
     const k = layout.get(p)
     return k ? k.x + k.w / 2 : -1
-  })
+  })) moving = true
+  return moving
 }
 
 const keyFills = new Map<number, string>()
@@ -655,7 +662,9 @@ function soundingKeys(s: Scene, vis: number[]) {
   return soundingMap
 }
 
+/** Returns whether any effect is still playing. */
 function drawEffects(ctx: CanvasRenderingContext2D, W: number, hitY: number, now: number, fx: Effects, calm: boolean, cx: (p: number) => number) {
+  const live = (t0: number, ms: number) => now - t0 >= 0 && now - t0 < ms
   // Shockwave rings at the key.
   if (pal.additive) ctx.globalCompositeOperation = 'lighter'
   for (const r of fx.rings) {
@@ -716,4 +725,5 @@ function drawEffects(ctx: CanvasRenderingContext2D, W: number, hitY: number, now
   }
   ctx.globalAlpha = 1
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
+  return fx.rings.some((r) => live(r.t0, 320)) || fx.sparks.some((p) => live(p.t0, 450)) || fx.pops.some((p) => live(p.t0, 420)) || live(fx.mile.t0, 900)
 }

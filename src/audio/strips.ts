@@ -25,6 +25,9 @@ export function moveStrip(strip: Strip, v: number) {
   audio.stripFx(fx, strip === 'mod' && fx === 'filter' ? -v : v) // the mod strip only goes up: up closes the filter
 }
 
+/** Both strips back to no effect, the held one too. */
+export function resetStrips() { last = 0; audio.stripsOff() }
+
 export function chooseStripFx(strip: Strip, fx: StripFx) {
   const s = settings.get().strips
   audio.stripFx(s[strip], 0) // a strip left up must not leave its old effect on

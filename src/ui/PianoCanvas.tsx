@@ -8,7 +8,8 @@ const lite = renderOpts.lite = lightEngine()
 const MAX_DPR = lite ? 1.5 : Infinity
 
 /**
- * Canvas that redraws every animation frame from `scene()`. React renders it once;
+ * Canvas that redraws every animation frame from `scene()` while something moves (always, in a session with `tick`);
+ * a still picture is redrawn only on input, a resize, a re-render, or a few times a second. React renders it once;
  * the frame loop never touches React state. `tick` runs before each draw (session clock, scoring).
  * `fx` holds hit effects pushed by the caller; without one the canvas keeps its own (key travel only).
  */
@@ -21,13 +22,22 @@ export function PianoCanvas({ scene, tick, fx }: { scene: () => Scene; tick?: ()
   const tickRef = useRef(tick)
   sceneRef.current = scene
   tickRef.current = tick
+  const still = useRef(false)
+  still.current = false // a re-render can bring a new scene
 
   useEffect(() => {
     const canvas = ref.current!
     const ctx = canvas.getContext('2d', { alpha: false })!
-    let raf = 0
+    let raf = 0, last = 0
+    const wake = () => { still.current = false }
+    const off = midi.on(wake)
+    const resized = new ResizeObserver(wake); resized.observe(canvas)
     const frame = () => {
       raf = requestAnimationFrame(frame)
+      const now = performance.now()
+      // Idle, a full redraw 60 times a second cost ~15 % of a core; 4 a second still catches anything not woken above.
+      if (still.current && !tickRef.current && now - last < 250) return
+      last = now
       tickRef.current?.()
       const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR)
       const w = canvas.clientWidth, h = canvas.clientHeight
@@ -35,10 +45,10 @@ export function PianoCanvas({ scene, tick, fx }: { scene: () => Scene; tick?: ()
         canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr)
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      drawScene(ctx, w, h, sceneRef.current(), performance.now(), fxRef.current)
+      still.current = !drawScene(ctx, w, h, sceneRef.current(), now, fxRef.current)
     }
     raf = requestAnimationFrame(frame)
-    return () => cancelAnimationFrame(raf)
+    return () => { cancelAnimationFrame(raf); off(); resized.disconnect() }
   }, [])
 
   // Mouse/touch on the drawn keyboard plays notes (no hardware needed).
