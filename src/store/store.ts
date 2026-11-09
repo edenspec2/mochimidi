@@ -130,7 +130,7 @@ export function streak(days: Record<string, number>): number {
 }
 
 export interface Track { id: string; name: string; instrument: InstrumentId; notes: NoteEvent[]; muted?: boolean; drums?: boolean }
-export interface Composition { id: string; name: string; bpm: number; timeSig: [number, number]; tracks: Track[]; updated: number }
+export interface Composition { id: string; name: string; bpm: number; timeSig: [number, number]; tracks: Track[]; updated: number; lesson?: boolean } // lesson: listed under Learn
 // shortcut: compositions live in localStorage (~5 MB cap); move to IndexedDB if users keep hundreds of long takes.
 export const library = persisted<{ items: Composition[] }>('compositions', { items: [] })
 /** The composition open in Create, saved or not – so leaving the page never loses work. */

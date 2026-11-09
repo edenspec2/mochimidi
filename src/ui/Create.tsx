@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { audio, INSTRUMENTS, type InstrumentId } from '../audio/audioEngine'
 import { padSampler } from '../audio/padSamples'
-import { quantize, Recorder } from '../engine/recorder'
+import { cleanTake, quantize, Recorder } from '../engine/recorder'
+import { lessonFromComposition } from '../lessons/own'
 import { Session, type SessionState } from '../engine/session'
 import { bindingName, ccPresses, sameControl, type Binding } from '../midi/binding'
 import { midi } from '../midi/midiInput'
@@ -56,7 +57,7 @@ function asLesson(c: Composition, notes: NoteEvent[], countIn: number): Lesson {
   return { id: 'composition', stage: 6, kind: 'play', title: c.name, goal: '', intro: [], bpm: c.bpm, timeSig: c.timeSig, notes, hands: 'R', pass: { minAccuracy: 0 }, countIn }
 }
 
-export function Create() {
+export function Create({ onPractice }: { onPractice: (l: Lesson) => void }) {
   const st = useStore(settings)
   const lib = useStore(library)
   const jm = useStore(jam)
@@ -271,14 +272,17 @@ export function Create() {
   })
 
   // ---- library / files ----
-  const save = () => {
-    const c = { ...comp, updated: Date.now() }
+  const save = (from = comp) => {
+    const c = { ...from, updated: Date.now() }
     if (!library.set((l) => ({ items: [c, ...l.items.filter((x) => x.id !== c.id)] }))) {
       alert('Not saved: the browser storage for this app is full. Export the song as .mid to keep it, or delete old songs in "My songs" and save again.')
-      return
+      return false
     }
     setCompRaw(c); setDirty(false)
+    return true
   }
+  // Saved with the flag, so it stays under Learn; every later Save updates the lesson too.
+  const makeLesson = () => { stop(); const c = { ...comp, lesson: true }; if (save(c)) onPractice(lessonFromComposition(c)) }
   const exportMidi = () => {
     const bytes = toMidiFile(comp.tracks.map((t) => ({ name: t.name, notes: t.notes, drums: t.drums })), comp.bpm, comp.timeSig)
     const a = document.createElement('a')
@@ -326,7 +330,9 @@ export function Create() {
         <div className="row">
           <button className="btn" onClick={() => setShowLib(!showLib)}>📂 My songs ({lib.items.length})</button>
           <button className="btn" onClick={() => { if (!discardOk()) return; stop(); setComp(newComposition()); setActive(0) }}>New</button>
-          <button className="btn primary" onClick={save}>Save</button>
+          <button className="btn primary" onClick={() => save()}>Save</button>
+          <button className="btn" onClick={makeLesson} disabled={!everything.length} title="Save this song and practise it like a lesson, with Wait mode and stars. It stays under Learn → Your lessons.">🎓 {comp.lesson ? 'Practise lesson' : 'Make it a lesson'}</button>
+          {comp.lesson && <button className="btn small ghost" onClick={() => save({ ...comp, lesson: false })} title="Take it off the Learn page; the song stays in My songs">Not a lesson</button>}
           <button className="btn" onClick={exportMidi} disabled={!everything.length}>Export .mid</button>
           <label className="btn">Import .mid<input type="file" accept=".mid,.midi,audio/midi" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void importMidi(f); e.target.value = '' }} /></label>
         </div>
@@ -367,6 +373,7 @@ export function Create() {
           <select value={grid} onChange={(e) => setGrid(+e.target.value)}>{GRIDS.map((g) => <option key={g.l} value={g.v}>{g.l}</option>)}</select>
         </label>
         <button className="btn small" data-tour="quantize" onClick={() => { updateTrack(active, (t) => ({ ...t, notes: quantize(t.notes, grid) })); setQuantized((q) => q + 1) }} disabled={!track.notes.length} title="Snap the selected track to the grid">Quantize</button>
+        <button className="btn small" onClick={() => updateTrack(active, (t) => ({ ...t, notes: cleanTake(t.notes, grid) }))} disabled={!track.notes.length} title="Tidy the selected track: drops stray touches and doubled keys, then snaps to the grid. Ctrl+Z undoes it.">🧹 Clean up</button>
         <button className="btn small" onClick={() => updateTrack(active, (t) => ({ ...t, notes: quantize(t.notes, grid, 0.5) }))} disabled={!track.notes.length} title="Move notes half-way to the grid – tighter but still human">Quantize 50%</button>
         <label className="row" style={{ gap: 6 }}>Zoom <input type="range" min={0.5} max={2.5} step={0.1} value={zoom} onChange={(e) => setZoom(+e.target.value)} /></label>
         {sel !== null && track.notes[sel] && (

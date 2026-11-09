@@ -119,12 +119,12 @@ export default function App() {
         </div>
       </nav>
       <main className="main">
-        {page === 'learn' && <Learn open={open} />}
+        {page === 'learn' && <Learn open={open} create={() => go('create')} />}
         {page === 'practice' && lesson && (lesson.kind === 'echo'
           ? <EchoLesson key={lesson.id} lesson={lesson} onExit={() => go('learn')} onNext={next ? () => open(next) : undefined} />
           : <Practice key={lesson.id} lesson={lesson} onExit={() => go('learn')} onNext={next ? () => open(next) : undefined} />)}
         {page === 'explore' && <Explore onPractice={open} />}
-        {page === 'create' && <Create />}
+        {page === 'create' && <Create onPractice={open} />}
         {page === 'progress' && <ProgressPage />}
         {page === 'settings' && <Settings rerunSetup={() => transition(() => setSetup(true))} />}
       </main>

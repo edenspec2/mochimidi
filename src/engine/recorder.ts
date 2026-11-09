@@ -60,3 +60,21 @@ export function quantize(notes: NoteEvent[], grid: number, strength = 1): NoteEv
     return { ...n, start: Math.max(0, start), dur: n.dur + (qd - n.dur) * strength }
   })
 }
+
+/**
+ * A take made fit to practise: stray touches out (very quiet, or a quick brush of a neighbouring key while a much louder
+ * one went down), timing snapped to `grid`, and no key doubled or overlapping itself.
+ */
+export function cleanTake(notes: NoteEvent[], grid: number): NoteEvent[] {
+  const brushed = (n: NoteEvent) => n.dur < 0.5 && notes.some((m) => m !== n && m.drum === undefined && Math.abs(m.pitch - n.pitch) <= 2
+    && Math.abs(m.start - n.start) < 0.08 && (m.vel ?? 100) > (n.vel ?? 100) * 1.6)
+  const kept = notes.filter((n) => n.drum !== undefined || ((n.vel ?? 100) >= 20 && n.dur >= Math.min(0.1, grid / 2) && !brushed(n)))
+  const out: NoteEvent[] = []
+  for (const n of quantize(kept, grid).sort((a, b) => a.pitch - b.pitch || a.start - b.start || b.dur - a.dur)) {
+    const prev = out.at(-1)
+    if (prev?.pitch === n.pitch && prev.start === n.start) continue // the same key twice on one beat: keep the longer
+    if (prev?.pitch === n.pitch && prev.drum === undefined && prev.start + prev.dur > n.start) prev.dur = n.start - prev.start
+    out.push(n)
+  }
+  return out.sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+}

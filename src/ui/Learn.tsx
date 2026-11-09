@@ -1,6 +1,7 @@
 import { CURRICULUM, STAGES } from '../lessons/curriculum'
 import type { Lesson } from '../music/types'
-import { progress, useStore, type Progress } from '../store/store'
+import { lessonFromComposition } from '../lessons/own'
+import { library, progress, useStore, type Progress } from '../store/store'
 import { RankBadge, rankOf, Stars } from './Results'
 
 /**
@@ -25,10 +26,11 @@ const tilt = (e: React.PointerEvent<HTMLElement>) => {
 }
 const untilt = (e: React.PointerEvent<HTMLElement>) => { e.currentTarget.style.setProperty('--rx', '0deg'); e.currentTarget.style.setProperty('--ry', '0deg') }
 
-export function Learn({ open }: { open: (l: Lesson) => void }) {
+export function Learn({ open, create }: { open: (l: Lesson) => void; create: () => void }) {
   const p = useStore(progress)
+  const own = useStore(library).items.filter((c) => c.lesson).map(lessonFromComposition)
   const next = nextLesson(p)
-  const totalStars = Object.values(p.lessons).reduce((a, l) => a + l.stars, 0)
+  const totalStars = CURRICULUM.reduce((a, l) => a + (p.lessons[l.id]?.stars ?? 0), 0) // your own lessons are not out of the total
 
   return (
     <div className="page learn">
@@ -84,6 +86,24 @@ export function Learn({ open }: { open: (l: Lesson) => void }) {
           </section>
         )
       })}
+
+      <section className="col stage" style={{ gap: 14 }}>
+        <div className="stage-head">
+          <span className="stage-badge" aria-hidden>🎓</span>
+          <div className="col" style={{ gap: 2, minWidth: 0 }}><span className="stage-num">Made by you</span><h2>Your lessons</h2></div>
+        </div>
+        <p className="sub stage-blurb">Record yourself in Create, press 🧹 Clean up, then 🎓 Make it a lesson. It lands here, to practise with Wait mode and stars.</p>
+        <div className="grid">
+          {own.map((l) => (
+            <button key={l.id} className="card lesson-card kind-play" onPointerMove={tilt} onPointerLeave={untilt} onClick={() => open(l)} title={l.goal}>
+              <div className="row" style={{ justifyContent: 'space-between' }}><span className="pill kind">Yours</span><Stars n={p.lessons[l.id]?.stars ?? 0} /></div>
+              <h3>{l.title}</h3>
+              <p className="sub" style={{ fontSize: '0.88rem' }}>{l.notes.length} notes · {l.bpm} bpm{l.key ? ` · ${l.key}` : ''}</p>
+            </button>
+          ))}
+          <button className="card lesson-card" onClick={create}><h3>+ Record a new one</h3><p className="sub" style={{ fontSize: '0.88rem' }}>Opens Create</p></button>
+        </div>
+      </section>
     </div>
   )
 }
